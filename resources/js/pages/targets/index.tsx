@@ -1,0 +1,888 @@
+import { Head, router, useForm } from '@inertiajs/react';
+import { CalendarDays, Clock, Lock, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import InputError from '@/components/input-error';
+import { PageHeader, primaryButtonClass } from '@/components/page-header';
+import { Scrollable } from '@/components/scrollable';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { DatePicker } from '@/components/ui/date-picker';
+import {
+    Dialog,
+    DialogClose,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
+import { Spinner } from '@/components/ui/spinner';
+import { Textarea } from '@/components/ui/textarea';
+import { dashboard } from '@/routes';
+
+type AssigneeOption = { value: number; label: string };
+
+type ItemRow = {
+    id: number;
+    label: string;
+    quantity: number | null;
+    is_done: boolean;
+};
+
+type TargetRow = {
+    id: number;
+    user_id: number;
+    assignee: string | null;
+    creator: string | null;
+    start_date: string;
+    end_date: string;
+    range_label: string;
+    status: string;
+    status_label: string;
+    close_reason: string | null;
+    note: string | null;
+    done: number;
+    total: number;
+    percent: number;
+    items: ItemRow[];
+};
+
+type Filters = { status: string; assignee: number | ''; group: string };
+
+type Props = {
+    targets: TargetRow[];
+    assigneeOptions: AssigneeOption[];
+    filters: Filters;
+};
+
+type FormItem = { id?: number; label: string; quantity: number | '' };
+type FormData = {
+    user_id: number;
+    start_date: string;
+    end_date: string;
+    note: string;
+    items: FormItem[];
+};
+
+const labelClasses = 'text-sm font-medium text-foreground/80';
+const fieldClasses =
+    'h-11 rounded-xl border-border bg-white/60 text-sm shadow-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-lux-teal focus-visible:ring-2 focus-visible:ring-lux-teal/20 dark:bg-white/5';
+const selectClasses =
+    '!h-11 w-full rounded-xl border-border bg-white/60 text-sm shadow-none focus-visible:border-lux-teal focus-visible:ring-2 focus-visible:ring-lux-teal/20 dark:bg-white/5';
+const filterSelectClasses =
+    '!h-9 rounded-lg border-border bg-white/60 text-sm shadow-none focus-visible:border-lux-teal focus-visible:ring-2 focus-visible:ring-lux-teal/20 dark:bg-white/5';
+const textareaClasses =
+    'min-h-20 rounded-xl border-border bg-white/60 text-sm shadow-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-lux-teal focus-visible:ring-2 focus-visible:ring-lux-teal/20 dark:bg-white/5';
+const checkboxClasses =
+    'mt-0.5 size-5 rounded-md data-[state=checked]:border-lux-teal data-[state=checked]:bg-lux-teal';
+
+const daysChipClass: Record<string, string> = {
+    teal: 'bg-lux-teal-light text-lux-teal-dark dark:bg-lux-teal/20 dark:text-lux-teal',
+    amber: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
+    rose: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300',
+};
+
+function initials(name: string | null): string {
+    if (!name) return '—';
+    return (
+        name
+            .trim()
+            .split(/\s+/)
+            .slice(0, 2)
+            .map((word) => word[0])
+            .join('')
+            .toUpperCase() || '—'
+    );
+}
+
+function daysLeftInfo(endDate: string, isOpen: boolean) {
+    if (!isOpen) return null;
+    const end = new Date(`${endDate}T00:00:00`);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const diff = Math.round((end.getTime() - today.getTime()) / 86_400_000);
+    if (diff > 1) return { label: `${diff} hari lagi`, tone: 'teal' as const };
+    if (diff === 1) return { label: 'Berakhir besok', tone: 'amber' as const };
+    if (diff === 0)
+        return { label: 'Berakhir hari ini', tone: 'amber' as const };
+    return { label: `Lewat ${Math.abs(diff)} hari`, tone: 'rose' as const };
+}
+
+function ProgressRing({ percent }: { percent: number }) {
+    const radius = 15.5;
+    const circumference = 2 * Math.PI * radius;
+    return (
+        <div className="relative grid size-16 shrink-0 place-items-center">
+            <svg viewBox="0 0 36 36" className="size-16 -rotate-90">
+                <circle
+                    cx="18"
+                    cy="18"
+                    r={radius}
+                    fill="none"
+                    strokeWidth="3"
+                    className="stroke-muted"
+                />
+                <circle
+                    cx="18"
+                    cy="18"
+                    r={radius}
+                    fill="none"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeDasharray={circumference}
+                    strokeDashoffset={circumference * (1 - percent / 100)}
+                    className="stroke-lux-teal transition-[stroke-dashoffset] duration-500"
+                />
+            </svg>
+            <span className="absolute text-sm font-bold tabular-nums">
+                {percent}%
+            </span>
+        </div>
+    );
+}
+
+export default function TargetsIndex({
+    targets,
+    assigneeOptions,
+    filters,
+}: Props) {
+    const today = new Date().toISOString().slice(0, 10);
+    const [createOpen, setCreateOpen] = useState(false);
+    const [editing, setEditing] = useState<TargetRow | null>(null);
+    const [closing, setClosing] = useState<TargetRow | null>(null);
+    const [deleting, setDeleting] = useState<TargetRow | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    const newItem = (): FormItem => ({ label: '', quantity: '' });
+
+    const emptyForm = (): FormData => ({
+        user_id: assigneeOptions[0]?.value ?? 0,
+        start_date: today,
+        end_date: today,
+        note: '',
+        items: [newItem()],
+    });
+
+    const createForm = useForm<FormData>(emptyForm());
+    const editForm = useForm<FormData>(emptyForm());
+    const closeForm = useForm<{ close_reason: string }>({ close_reason: '' });
+
+    const err = (form: typeof createForm, key: string) =>
+        (form.errors as Record<string, string>)[key];
+
+    const setFilter = (key: keyof Filters, value: string) => {
+        const next: Record<string, string> = {
+            status: filters.status,
+            assignee: filters.assignee ? String(filters.assignee) : '',
+            group: filters.group,
+            [key]: value,
+        };
+        router.get(
+            '/targets',
+            {
+                status: next.status || undefined,
+                assignee: next.assignee || undefined,
+                group: next.group !== 'none' ? next.group : undefined,
+            },
+            { preserveState: true, preserveScroll: true, replace: true },
+        );
+    };
+
+    const groups = useMemo(() => {
+        if (filters.group === 'none') {
+            return [{ key: 'all', label: '', items: targets }];
+        }
+        const map = new Map<string, TargetRow[]>();
+        for (const target of targets) {
+            const key =
+                filters.group === 'assignee'
+                    ? (target.assignee ?? '—')
+                    : target.status_label;
+            const list = map.get(key) ?? [];
+            list.push(target);
+            map.set(key, list);
+        }
+        return [...map.entries()].map(([key, items]) => ({
+            key,
+            label: key,
+            items,
+        }));
+    }, [targets, filters.group]);
+
+    const addItem = (form: typeof createForm) =>
+        form.setData('items', [...form.data.items, newItem()]);
+    const removeItem = (form: typeof createForm, idx: number) =>
+        form.setData(
+            'items',
+            form.data.items.filter((_, i) => i !== idx),
+        );
+    const setItemField = (
+        form: typeof createForm,
+        idx: number,
+        field: keyof FormItem,
+        value: string | number,
+    ) =>
+        form.setData(
+            'items',
+            form.data.items.map((it, i) =>
+                i === idx ? { ...it, [field]: value } : it,
+            ),
+        );
+
+    const openCreate = () => {
+        createForm.clearErrors();
+        createForm.setData(emptyForm());
+        setCreateOpen(true);
+    };
+
+    const submitCreate = (e: React.FormEvent) => {
+        e.preventDefault();
+        createForm.post('/targets', {
+            preserveScroll: true,
+            onSuccess: () => {
+                setCreateOpen(false);
+                createForm.reset();
+            },
+        });
+    };
+
+    const openEdit = (target: TargetRow) => {
+        editForm.clearErrors();
+        editForm.setData({
+            user_id: target.user_id,
+            start_date: target.start_date,
+            end_date: target.end_date,
+            note: target.note ?? '',
+            items: target.items.map((it) => ({
+                id: it.id,
+                label: it.label,
+                quantity: it.quantity ?? '',
+            })),
+        });
+        setEditing(target);
+    };
+
+    const submitEdit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editing) return;
+        editForm.patch(`/targets/${editing.id}`, {
+            preserveScroll: true,
+            onSuccess: () => setEditing(null),
+        });
+    };
+
+    const openClose = (target: TargetRow) => {
+        closeForm.clearErrors();
+        closeForm.setData('close_reason', '');
+        setClosing(target);
+    };
+
+    const submitClose = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!closing) return;
+        closeForm.post(`/targets/${closing.id}/close`, {
+            preserveScroll: true,
+            onSuccess: () => setClosing(null),
+        });
+    };
+
+    const confirmDelete = () => {
+        if (!deleting) return;
+        setIsDeleting(true);
+        router.delete(`/targets/${deleting.id}`, {
+            preserveScroll: true,
+            onFinish: () => setIsDeleting(false),
+            onSuccess: () => setDeleting(null),
+        });
+    };
+
+    const toggleItem = (itemId: number) => {
+        router.patch(
+            `/target-items/${itemId}/toggle`,
+            {},
+            { preserveScroll: true, preserveState: true },
+        );
+    };
+
+    const renderFields = (form: typeof createForm, prefix: string) => (
+        <>
+            <div className="grid gap-2">
+                <Label htmlFor={`${prefix}-assignee`} className={labelClasses}>
+                    Anggota
+                </Label>
+                <Select
+                    value={String(form.data.user_id)}
+                    onValueChange={(v) => form.setData('user_id', Number(v))}
+                >
+                    <SelectTrigger
+                        id={`${prefix}-assignee`}
+                        className={selectClasses}
+                    >
+                        <SelectValue placeholder="Pilih anggota" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {assigneeOptions.map((o) => (
+                            <SelectItem key={o.value} value={String(o.value)}>
+                                {o.label}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+                <InputError message={err(form, 'user_id')} />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-2">
+                    <Label htmlFor={`${prefix}-start`} className={labelClasses}>
+                        Mulai
+                    </Label>
+                    <DatePicker
+                        id={`${prefix}-start`}
+                        value={form.data.start_date}
+                        onChange={(v) => form.setData('start_date', v)}
+                    />
+                    <InputError message={err(form, 'start_date')} />
+                </div>
+                <div className="grid gap-2">
+                    <Label htmlFor={`${prefix}-end`} className={labelClasses}>
+                        Selesai
+                    </Label>
+                    <DatePicker
+                        id={`${prefix}-end`}
+                        value={form.data.end_date}
+                        min={form.data.start_date || undefined}
+                        onChange={(v) => form.setData('end_date', v)}
+                    />
+                    <InputError message={err(form, 'end_date')} />
+                </div>
+            </div>
+
+            {/* free-text checklist items (name + quantity) */}
+            <div className="grid gap-2">
+                <Label className={labelClasses}>Item target (checklist)</Label>
+                <div className="grid grid-cols-[1fr_5.5rem_2.75rem] gap-2 px-0.5 text-xs font-medium text-muted-foreground">
+                    <span>Nama item</span>
+                    <span>Jumlah</span>
+                    <span />
+                </div>
+                <div className="space-y-2">
+                    {form.data.items.map((item, idx) => (
+                        <div
+                            key={idx}
+                            className="grid grid-cols-[1fr_5.5rem_2.75rem] items-start gap-2"
+                        >
+                            <div className="grid gap-1">
+                                <Input
+                                    value={item.label}
+                                    onChange={(e) =>
+                                        setItemField(
+                                            form,
+                                            idx,
+                                            'label',
+                                            e.target.value,
+                                        )
+                                    }
+                                    placeholder="mis. Buat akun Instagram"
+                                    className={fieldClasses}
+                                />
+                                <InputError
+                                    message={err(form, `items.${idx}.label`)}
+                                />
+                            </div>
+                            <div className="grid gap-1">
+                                <Input
+                                    type="number"
+                                    min={1}
+                                    value={item.quantity}
+                                    onChange={(e) =>
+                                        setItemField(
+                                            form,
+                                            idx,
+                                            'quantity',
+                                            e.target.value === ''
+                                                ? ''
+                                                : Number(e.target.value),
+                                        )
+                                    }
+                                    placeholder="Jml"
+                                    className={fieldClasses}
+                                />
+                                <InputError
+                                    message={err(form, `items.${idx}.quantity`)}
+                                />
+                            </div>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-11 w-11 shrink-0 rounded-xl text-muted-foreground hover:text-destructive"
+                                onClick={() => removeItem(form, idx)}
+                                disabled={form.data.items.length === 1}
+                            >
+                                <X className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    ))}
+                </div>
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-fit gap-1.5 rounded-lg"
+                    onClick={() => addItem(form)}
+                >
+                    <Plus className="h-3.5 w-3.5" />
+                    Tambah item
+                </Button>
+                <InputError message={err(form, 'items')} />
+            </div>
+
+            <div className="grid gap-2">
+                <Label htmlFor={`${prefix}-note`} className={labelClasses}>
+                    Catatan{' '}
+                    <span className="font-normal text-muted-foreground">
+                        (opsional)
+                    </span>
+                </Label>
+                <Textarea
+                    id={`${prefix}-note`}
+                    value={form.data.note}
+                    onChange={(e) => form.setData('note', e.target.value)}
+                    rows={2}
+                    placeholder="Instruksi tambahan untuk anggota..."
+                    className={textareaClasses}
+                />
+                <InputError message={err(form, 'note')} />
+            </div>
+        </>
+    );
+
+    const renderCard = (target: TargetRow) => {
+        const isOpen = target.status === 'open';
+        const days = daysLeftInfo(target.end_date, isOpen);
+
+        return (
+            <div
+                key={target.id}
+                className="glass-card relative flex flex-col overflow-hidden rounded-2xl p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl"
+            >
+                {isOpen && (
+                    <span className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-transparent via-lux-teal to-transparent opacity-70" />
+                )}
+
+                {/* identity */}
+                <div className="flex items-start gap-3">
+                    <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-lux-teal/20 to-lux-teal/5 text-sm font-bold text-lux-teal-dark ring-1 ring-lux-teal/15 dark:text-lux-teal">
+                        {initials(target.assignee)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                        <p className="truncate font-semibold tracking-tight">
+                            {target.assignee ?? '—'}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                            Ditugaskan oleh {target.creator ?? '—'}
+                        </p>
+                    </div>
+                    <span
+                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+                            isOpen
+                                ? 'bg-lux-teal-light text-lux-teal-dark dark:bg-lux-teal/20 dark:text-lux-teal'
+                                : 'bg-muted text-muted-foreground'
+                        }`}
+                    >
+                        <span
+                            className={`size-1.5 rounded-full ${isOpen ? 'bg-lux-teal' : 'bg-muted-foreground/50'}`}
+                        />
+                        {target.status_label}
+                    </span>
+                </div>
+
+                {/* focal: progress ring + meta */}
+                <div className="mt-3 flex items-center gap-4 rounded-xl bg-white/40 p-3 dark:bg-white/[0.03]">
+                    <ProgressRing percent={target.percent} />
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <CalendarDays className="size-3.5 shrink-0" />
+                            {target.range_label}
+                        </p>
+                        <p className="text-sm font-semibold tracking-tight">
+                            {target.done}
+                            <span className="text-muted-foreground">
+                                /{target.total}
+                            </span>{' '}
+                            item selesai
+                        </p>
+                        {days && (
+                            <span
+                                className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${daysChipClass[days.tone]}`}
+                            >
+                                <Clock className="size-3" />
+                                {days.label}
+                            </span>
+                        )}
+                    </div>
+                </div>
+
+                {/* checklist — fixed height for consistent, compact cards */}
+                <div className="mt-3">
+                    <Scrollable className="h-28 space-y-0.5 pr-1">
+                        {target.items.map((item) => (
+                            <label
+                                key={item.id}
+                                className="flex cursor-pointer items-start gap-2.5 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-muted/50"
+                            >
+                                <Checkbox
+                                    checked={item.is_done}
+                                    onCheckedChange={() => toggleItem(item.id)}
+                                    className={checkboxClasses}
+                                />
+                                <span
+                                    className={`flex-1 ${
+                                        item.is_done
+                                            ? 'text-muted-foreground line-through'
+                                            : ''
+                                    }`}
+                                >
+                                    {item.label}
+                                </span>
+                                {item.quantity != null && (
+                                    <span className="mt-px shrink-0 rounded-md bg-lux-teal/10 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-lux-teal-dark dark:text-lux-teal">
+                                        {item.quantity}
+                                    </span>
+                                )}
+                            </label>
+                        ))}
+                    </Scrollable>
+                </div>
+
+                {target.note && (
+                    <p className="mt-3 line-clamp-2 text-xs text-muted-foreground">
+                        {target.note}
+                    </p>
+                )}
+                {target.close_reason && (
+                    <p className="mt-3 line-clamp-2 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">
+                            Alasan ditutup:
+                        </span>{' '}
+                        {target.close_reason}
+                    </p>
+                )}
+
+                {/* footer */}
+                <div className="mt-auto flex items-center justify-end gap-1.5 border-t border-border/60 pt-4">
+                    {isOpen && (
+                        <>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 gap-1.5 rounded-lg"
+                                onClick={() => openClose(target)}
+                            >
+                                <Lock className="h-3.5 w-3.5" />
+                                Tutup
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8 rounded-lg"
+                                onClick={() => openEdit(target)}
+                                title="Ubah"
+                            >
+                                <Pencil className="h-3.5 w-3.5" />
+                                <span className="sr-only">Ubah</span>
+                            </Button>
+                        </>
+                    )}
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8 rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => setDeleting(target)}
+                        title="Hapus"
+                    >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span className="sr-only">Hapus</span>
+                    </Button>
+                </div>
+            </div>
+        );
+    };
+
+    return (
+        <>
+            <Head title="Kelola Target" />
+
+            <div className="px-4 py-6 sm:px-6">
+                <PageHeader
+                    eyebrow="Manajemen Target"
+                    title="Kelola Target"
+                    description="Tetapkan target per anggota dengan rentang waktu dan daftar item. Centang tiap item saat selesai."
+                    action={
+                        <Button
+                            onClick={openCreate}
+                            className={`w-fit ${primaryButtonClass}`}
+                        >
+                            <Plus className="h-4 w-4" />
+                            Tambah Target
+                        </Button>
+                    }
+                />
+
+                {/* filters + group by */}
+                <div className="mt-6 flex flex-wrap items-center gap-2">
+                    <Select
+                        value={filters.status || 'all'}
+                        onValueChange={(v) =>
+                            setFilter('status', v === 'all' ? '' : v)
+                        }
+                    >
+                        <SelectTrigger className={`${filterSelectClasses} w-40`}>
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Semua status</SelectItem>
+                            <SelectItem value="open">Berjalan</SelectItem>
+                            <SelectItem value="closed">Ditutup</SelectItem>
+                        </SelectContent>
+                    </Select>
+
+                    <Select
+                        value={filters.assignee ? String(filters.assignee) : 'all'}
+                        onValueChange={(v) =>
+                            setFilter('assignee', v === 'all' ? '' : v)
+                        }
+                    >
+                        <SelectTrigger className={`${filterSelectClasses} w-48`}>
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Semua anggota</SelectItem>
+                            {assigneeOptions.map((o) => (
+                                <SelectItem key={o.value} value={String(o.value)}>
+                                    {o.label}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+
+                    <div className="ml-auto flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">
+                            Kelompokkan
+                        </span>
+                        <Select
+                            value={filters.group}
+                            onValueChange={(v) => setFilter('group', v)}
+                        >
+                            <SelectTrigger
+                                className={`${filterSelectClasses} w-36`}
+                            >
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="none">Tidak ada</SelectItem>
+                                <SelectItem value="assignee">Anggota</SelectItem>
+                                <SelectItem value="status">Status</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </div>
+
+                {targets.length === 0 ? (
+                    <div className="glass-card mt-4 rounded-2xl px-6 py-16 text-center text-muted-foreground">
+                        Tidak ada target yang cocok dengan filter ini.
+                    </div>
+                ) : (
+                    <div className="mt-4 space-y-6">
+                        {groups.map((group) => (
+                            <div key={group.key}>
+                                {group.label && (
+                                    <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold tracking-tight">
+                                        {group.label}
+                                        <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-normal text-muted-foreground tabular-nums">
+                                            {group.items.length}
+                                        </span>
+                                    </h2>
+                                )}
+                                <div className="grid gap-4 lg:grid-cols-2">
+                                    {group.items.map((target) =>
+                                        renderCard(target),
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* create dialog */}
+            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+                    <DialogHeader>
+                        <DialogTitle>Tambah Target</DialogTitle>
+                        <DialogDescription>
+                            Tugaskan target ke seorang anggota untuk satu rentang
+                            waktu.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={submitCreate} className="space-y-5">
+                        {renderFields(createForm, 'create')}
+                        <DialogFooter className="gap-2">
+                            <DialogClose asChild>
+                                <Button type="button" variant="secondary">
+                                    Batal
+                                </Button>
+                            </DialogClose>
+                            <Button
+                                type="submit"
+                                disabled={createForm.processing}
+                            >
+                                {createForm.processing && <Spinner />}
+                                Simpan
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
+            {/* edit dialog */}
+            <Dialog
+                open={editing !== null}
+                onOpenChange={(open) => !open && setEditing(null)}
+            >
+                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+                    <DialogHeader>
+                        <DialogTitle>Ubah Target</DialogTitle>
+                        <DialogDescription>
+                            Perbarui anggota, rentang, item, atau catatan target.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={submitEdit} className="space-y-5">
+                        {renderFields(editForm, 'edit')}
+                        <DialogFooter className="gap-2">
+                            <DialogClose asChild>
+                                <Button type="button" variant="secondary">
+                                    Batal
+                                </Button>
+                            </DialogClose>
+                            <Button type="submit" disabled={editForm.processing}>
+                                {editForm.processing && <Spinner />}
+                                Simpan
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
+            {/* close dialog */}
+            <Dialog
+                open={closing !== null}
+                onOpenChange={(open) => !open && setClosing(null)}
+            >
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Tutup target</DialogTitle>
+                        <DialogDescription>
+                            Tutup target untuk{' '}
+                            <span className="font-medium text-foreground">
+                                {closing?.assignee}
+                            </span>
+                            . Jika tidak tercapai, tulis alasannya.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={submitClose} className="space-y-4">
+                        <div className="grid gap-2">
+                            <Label
+                                htmlFor="close-reason"
+                                className={labelClasses}
+                            >
+                                Alasan{' '}
+                                <span className="font-normal text-muted-foreground">
+                                    (opsional)
+                                </span>
+                            </Label>
+                            <Textarea
+                                id="close-reason"
+                                value={closeForm.data.close_reason}
+                                onChange={(e) =>
+                                    closeForm.setData(
+                                        'close_reason',
+                                        e.target.value,
+                                    )
+                                }
+                                rows={3}
+                                placeholder="mis. Target tidak tercapai karena akun kena limit."
+                                className={textareaClasses}
+                            />
+                            <InputError message={closeForm.errors.close_reason} />
+                        </div>
+                        <DialogFooter className="gap-2">
+                            <DialogClose asChild>
+                                <Button type="button" variant="secondary">
+                                    Batal
+                                </Button>
+                            </DialogClose>
+                            <Button
+                                type="submit"
+                                disabled={closeForm.processing}
+                            >
+                                {closeForm.processing && <Spinner />}
+                                Tutup target
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
+            {/* delete confirm */}
+            <Dialog
+                open={deleting !== null}
+                onOpenChange={(open) => !open && setDeleting(null)}
+            >
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Hapus target</DialogTitle>
+                        <DialogDescription>
+                            Yakin ingin menghapus target untuk{' '}
+                            <span className="font-medium text-foreground">
+                                {deleting?.assignee}
+                            </span>
+                            ? Semua item dan progres terkait ikut terhapus.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="gap-2">
+                        <DialogClose asChild>
+                            <Button type="button" variant="secondary">
+                                Batal
+                            </Button>
+                        </DialogClose>
+                        <Button
+                            variant="destructive"
+                            onClick={confirmDelete}
+                            disabled={isDeleting}
+                        >
+                            {isDeleting && <Spinner />}
+                            Hapus
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </>
+    );
+}
+
+TargetsIndex.layout = {
+    breadcrumbs: [
+        { title: 'Dasbor', href: dashboard() },
+        { title: 'Kelola Target', href: '/targets' },
+    ],
+};
