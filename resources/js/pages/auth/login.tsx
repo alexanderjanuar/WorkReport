@@ -33,9 +33,7 @@ export default function Login({ status, canResetPassword }: Props) {
                         href={home()}
                         className="mb-8 flex items-center justify-center gap-2.5"
                     >
-                        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-lux-black shadow-sm">
-                            <AppLogoIcon className="h-5 w-auto fill-white" />
-                        </span>
+                        <AppLogoIcon className="size-12 shrink-0" />
                         <span className="leading-tight">
                             <span className="block text-lg font-bold tracking-tight">
                                 WorkReport

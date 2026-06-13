@@ -8,6 +8,7 @@ use App\Models\TargetItem;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -22,7 +23,15 @@ class TargetController extends Controller
     {
         $status = $request->input('status');         // '' | open | closed
         $assignee = $request->input('assignee');     // '' | user id
-        $group = $request->input('group', 'none');   // none | assignee | status
+        $group = $request->input('group', 'week');   // week | none | assignee | status
+        $period = $request->input('period', 'all');  // all|today|week|month|last_month|custom
+
+        // Resolve the period preset (or custom from/to) into a [from, to] range.
+        [$from, $to] = $this->resolvePeriod(
+            $period,
+            $request->input('from'),
+            $request->input('to'),
+        );
 
         $targets = Target::query()
             ->with(['assignee:id,name', 'creator:id,name', 'items'])
@@ -31,6 +40,9 @@ class TargetController extends Controller
                 fn ($query) => $query->where('status', $status),
             )
             ->when($assignee, fn ($query) => $query->where('user_id', $assignee))
+            // A target matches a period when its range overlaps [from, to].
+            ->when($from, fn ($query) => $query->whereDate('end_date', '>=', $from))
+            ->when($to, fn ($query) => $query->whereDate('start_date', '<=', $to))
             ->when(
                 $group === 'assignee',
                 fn ($query) => $query->orderBy(
@@ -42,9 +54,6 @@ class TargetController extends Controller
             ->get()
             ->map(fn (Target $target) => $this->present($target));
 
-        // $targets = Target::query()
-        //         ->with(['assignee:id,name', 'creator:id,name', 'items'])
-
         return Inertia::render('targets/index', [
             'targets' => $targets,
             'assigneeOptions' => User::orderBy('name')
@@ -53,9 +62,42 @@ class TargetController extends Controller
             'filters' => [
                 'status' => in_array($status, ['open', 'closed'], true) ? $status : '',
                 'assignee' => $assignee ? (int) $assignee : '',
-                'group' => in_array($group, ['assignee', 'status'], true) ? $group : 'none',
+                'group' => in_array($group, ['week', 'none', 'assignee', 'status'], true) ? $group : 'week',
+                'period' => in_array($period, ['today', 'week', 'month', 'last_month', 'custom'], true) ? $period : 'all',
+                'from' => $period === 'custom' && $from ? $from : '',
+                'to' => $period === 'custom' && $to ? $to : '',
+                'range_label' => ($from || $to)
+                    ? ($from ? Carbon::parse($from)->translatedFormat('d M') : '…')
+                        .' – '.($to ? Carbon::parse($to)->translatedFormat('d M Y') : '…')
+                    : '',
             ],
         ]);
+    }
+
+    /**
+     * Turn a period preset (or custom from/to) into a [from, to] date range.
+     * Either bound may be null (open-ended).
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function resolvePeriod(string $period, ?string $from, ?string $to): array
+    {
+        $today = now();
+
+        return match ($period) {
+            'today' => [$today->toDateString(), $today->toDateString()],
+            'week' => [$today->startOfWeek()->toDateString(), $today->endOfWeek()->toDateString()],
+            'month' => [$today->startOfMonth()->toDateString(), $today->endOfMonth()->toDateString()],
+            'last_month' => [
+                $today->subMonthNoOverflow()->startOfMonth()->toDateString(),
+                $today->subMonthNoOverflow()->endOfMonth()->toDateString(),
+            ],
+            'custom' => [
+                $from ? Carbon::parse($from)->toDateString() : null,
+                $to ? Carbon::parse($to)->toDateString() : null,
+            ],
+            default => [null, null],
+        };
     }
 
     /**

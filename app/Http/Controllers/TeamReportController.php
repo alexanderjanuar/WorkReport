@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Report;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Inertia\Inertia;
@@ -17,22 +18,32 @@ class TeamReportController extends Controller
     {
         $search = trim((string) $request->input('search', ''));
         $date = $request->input('date');
+        $group = $request->input('group', 'date');   // date | member
 
         $reports = Report::query()
-            ->with(['user:id,name', 'target:id,start_date,end_date'])
+            ->with(['user:id,name', 'target:id,start_date,end_date', 'targetItem:id,label'])
             ->when($search !== '', fn ($query) => $query->whereHas(
                 'user',
                 fn ($q) => $q->where('name', 'like', "%{$search}%"),
             ))
             ->when($date, fn ($query) => $query->whereDate('reported_on', $date))
+            // Group-by member keeps each member's rows contiguous (then by date).
+            ->when(
+                $group === 'member',
+                fn ($query) => $query->orderBy(
+                    User::select('name')->whereColumn('users.id', 'reports.user_id'),
+                ),
+            )
             ->latest('reported_on')
             ->latest('id')
-            ->paginate(15)
+            ->paginate(25)
             ->withQueryString()
             ->through(fn (Report $report) => [
                 'id' => $report->id,
                 'reported_on' => $report->reported_on->translatedFormat('d M Y'),
+                'date_label' => $report->reported_on->translatedFormat('l, d M Y'),
                 'user' => $report->user?->name,
+                'item_label' => $report->targetItem?->label ?? $report->item_label,
                 'platform_label' => $report->platform->label(),
                 'quantity' => $report->quantity,
                 'post_url' => $report->post_url,
@@ -46,6 +57,7 @@ class TeamReportController extends Controller
             'filters' => [
                 'search' => $search,
                 'date' => $date ? Carbon::parse($date)->toDateString() : '',
+                'group' => in_array($group, ['date', 'member'], true) ? $group : 'date',
             ],
         ]);
     }

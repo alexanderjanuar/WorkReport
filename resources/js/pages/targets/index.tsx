@@ -1,5 +1,16 @@
 import { Head, router, useForm } from '@inertiajs/react';
-import { CalendarDays, Clock, Lock, Pencil, Plus, Trash2, X } from 'lucide-react';
+import {
+    CalendarDays,
+    CheckCircle2,
+    Clock,
+    Lock,
+    Pencil,
+    Plus,
+    TriangleAlert,
+    Trophy,
+    Trash2,
+    X,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 import InputError from '@/components/input-error';
 import { PageHeader, primaryButtonClass } from '@/components/page-header';
@@ -56,7 +67,23 @@ type TargetRow = {
     items: ItemRow[];
 };
 
-type Filters = { status: string; assignee: number | ''; group: string };
+type GroupView = {
+    key: string;
+    label: string;
+    range?: string;
+    current?: boolean;
+    items: TargetRow[];
+};
+
+type Filters = {
+    status: string;
+    assignee: number | '';
+    group: string;
+    period: string;
+    from: string;
+    to: string;
+    range_label: string;
+};
 
 type Props = {
     targets: TargetRow[];
@@ -91,6 +118,39 @@ const daysChipClass: Record<string, string> = {
     rose: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300',
 };
 
+const ID_MONTHS = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
+    'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des',
+];
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const toISO = (d: Date) =>
+    `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+function todayISO(): string {
+    return toISO(new Date());
+}
+
+/** Monday (local midnight) of the week containing the given YYYY-MM-DD. */
+function mondayOf(iso: string): Date {
+    const d = new Date(`${iso}T00:00:00`);
+    const dow = (d.getDay() + 6) % 7; // Mon = 0 … Sun = 6
+    d.setDate(d.getDate() - dow);
+    return d;
+}
+
+/** "Minggu N" label + date range for the week starting on `monday`. */
+function weekMeta(monday: Date): { num: number; range: string } {
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    const num = Math.ceil(monday.getDate() / 7);
+    const range =
+        monday.getMonth() === sunday.getMonth()
+            ? `${monday.getDate()} – ${sunday.getDate()} ${ID_MONTHS[sunday.getMonth()]} ${sunday.getFullYear()}`
+            : `${monday.getDate()} ${ID_MONTHS[monday.getMonth()]} – ${sunday.getDate()} ${ID_MONTHS[sunday.getMonth()]} ${sunday.getFullYear()}`;
+    return { num, range };
+}
+
 function initials(name: string | null): string {
     if (!name) return '—';
     return (
@@ -117,7 +177,83 @@ function daysLeftInfo(endDate: string, isOpen: boolean) {
     return { label: `Lewat ${Math.abs(diff)} hari`, tone: 'rose' as const };
 }
 
-function ProgressRing({ percent }: { percent: number }) {
+type StateKey = 'achieved' | 'overdue' | 'open' | 'closed';
+
+type StateStyle = {
+    label: string;
+    pill: string; // status pill bg/text
+    dot: string; // status pill leading dot
+    ring: string; // progress ring stroke
+    text: string; // progress ring center text
+    accent: string; // top accent bar gradient mid-color ('' = none)
+    card: string; // extra classes for the whole card
+};
+
+const stateStyles: Record<StateKey, StateStyle> = {
+    achieved: {
+        label: 'Tercapai',
+        pill: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
+        dot: 'bg-emerald-500',
+        ring: 'stroke-emerald-500',
+        text: 'text-emerald-600 dark:text-emerald-400',
+        accent: 'via-emerald-400',
+        card: 'ring-1 ring-emerald-500/30 bg-emerald-500/[0.035]',
+    },
+    overdue: {
+        label: 'Terlambat',
+        pill: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300',
+        dot: 'bg-rose-500',
+        ring: 'stroke-rose-500',
+        text: 'text-rose-600 dark:text-rose-400',
+        accent: 'via-rose-400',
+        card: 'ring-1 ring-rose-500/20',
+    },
+    open: {
+        label: 'Berjalan',
+        pill: 'bg-lux-teal-light text-lux-teal-dark dark:bg-lux-teal/20 dark:text-lux-teal',
+        dot: 'bg-lux-teal',
+        ring: 'stroke-lux-teal',
+        text: 'text-foreground',
+        accent: 'via-lux-teal',
+        card: '',
+    },
+    closed: {
+        label: 'Ditutup',
+        pill: 'bg-muted text-muted-foreground',
+        dot: 'bg-muted-foreground/50',
+        ring: 'stroke-muted-foreground/40',
+        text: 'text-muted-foreground',
+        accent: '',
+        card: '',
+    },
+};
+
+/** Derive a clear visual state from a target's progress + status + deadline. */
+function statusInfo(target: TargetRow): StateStyle & { key: StateKey } {
+    const achieved = target.total > 0 && target.percent === 100;
+    let key: StateKey;
+    if (achieved) {
+        key = 'achieved';
+    } else if (target.status !== 'open') {
+        key = 'closed';
+    } else {
+        const days = daysLeftInfo(target.end_date, true);
+        key = days?.tone === 'rose' ? 'overdue' : 'open';
+    }
+    return { key, ...stateStyles[key] };
+}
+
+function ProgressRing({
+    percent,
+    ring,
+    text,
+    achieved,
+}: {
+    percent: number;
+    ring: string;
+    text: string;
+    achieved: boolean;
+}) {
     const radius = 15.5;
     const circumference = 2 * Math.PI * radius;
     return (
@@ -140,12 +276,16 @@ function ProgressRing({ percent }: { percent: number }) {
                     strokeLinecap="round"
                     strokeDasharray={circumference}
                     strokeDashoffset={circumference * (1 - percent / 100)}
-                    className="stroke-lux-teal transition-[stroke-dashoffset] duration-500"
+                    className={`${ring} transition-[stroke-dashoffset] duration-500`}
                 />
             </svg>
-            <span className="absolute text-sm font-bold tabular-nums">
-                {percent}%
-            </span>
+            {achieved ? (
+                <CheckCircle2 className={`absolute size-6 ${text}`} />
+            ) : (
+                <span className={`absolute text-sm font-bold tabular-nums ${text}`}>
+                    {percent}%
+                </span>
+            )}
         </div>
     );
 }
@@ -179,28 +319,92 @@ export default function TargetsIndex({
     const err = (form: typeof createForm, key: string) =>
         (form.errors as Record<string, string>)[key];
 
-    const setFilter = (key: keyof Filters, value: string) => {
-        const next: Record<string, string> = {
+    const applyFilters = (patch: Record<string, string>) => {
+        const next = {
             status: filters.status,
             assignee: filters.assignee ? String(filters.assignee) : '',
             group: filters.group,
-            [key]: value,
+            period: filters.period,
+            from: filters.from,
+            to: filters.to,
+            ...patch,
         };
         router.get(
             '/targets',
             {
                 status: next.status || undefined,
                 assignee: next.assignee || undefined,
-                group: next.group !== 'none' ? next.group : undefined,
+                group:
+                    next.group && next.group !== 'week'
+                        ? next.group
+                        : undefined,
+                period:
+                    next.period && next.period !== 'all'
+                        ? next.period
+                        : undefined,
+                from: next.period === 'custom' ? next.from || undefined : undefined,
+                to: next.period === 'custom' ? next.to || undefined : undefined,
             },
             { preserveState: true, preserveScroll: true, replace: true },
         );
     };
 
-    const groups = useMemo(() => {
+    const setFilter = (key: keyof Filters, value: string) =>
+        applyFilters({ [key]: value });
+
+    const groups = useMemo<GroupView[]>(() => {
+        // Group by week-of-month; currently-running targets float into the
+        // current week so it lands at the very top ("Minggu ini").
+        if (filters.group === 'week') {
+            const today = todayISO();
+            const currentKey = toISO(mondayOf(today));
+            const map = new Map<string, GroupView & { monday: number }>();
+
+            for (const target of targets) {
+                const active =
+                    target.status === 'open' &&
+                    target.start_date <= today &&
+                    today <= target.end_date;
+                const monday = active
+                    ? mondayOf(today)
+                    : mondayOf(target.start_date);
+                const key = toISO(monday);
+
+                let g = map.get(key);
+                if (!g) {
+                    const meta = weekMeta(monday);
+                    g = {
+                        key,
+                        label: `Minggu ${meta.num}`,
+                        range: meta.range,
+                        current: key === currentKey,
+                        monday: monday.getTime(),
+                        items: [],
+                    };
+                    map.set(key, g);
+                }
+                g.items.push(target);
+            }
+
+            return [...map.values()]
+                .sort((a, b) => {
+                    if (a.key === currentKey) return -1;
+                    if (b.key === currentKey) return 1;
+                    return b.monday - a.monday; // newest week first
+                })
+                .map((g) => ({
+                    key: g.key,
+                    label: g.label,
+                    range: g.range,
+                    current: g.current,
+                    items: g.items,
+                }));
+        }
+
         if (filters.group === 'none') {
             return [{ key: 'all', label: '', items: targets }];
         }
+
         const map = new Map<string, TargetRow[]>();
         for (const target of targets) {
             const key =
@@ -468,15 +672,21 @@ export default function TargetsIndex({
 
     const renderCard = (target: TargetRow) => {
         const isOpen = target.status === 'open';
-        const days = daysLeftInfo(target.end_date, isOpen);
+        const st = statusInfo(target);
+        const days =
+            st.key === 'achieved'
+                ? null
+                : daysLeftInfo(target.end_date, isOpen);
 
         return (
             <div
                 key={target.id}
-                className="glass-card relative flex flex-col overflow-hidden rounded-2xl p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl"
+                className={`glass-card relative flex flex-col overflow-hidden rounded-2xl p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl ${st.card}`}
             >
-                {isOpen && (
-                    <span className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-transparent via-lux-teal to-transparent opacity-70" />
+                {st.accent && (
+                    <span
+                        className={`pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-transparent ${st.accent} to-transparent opacity-70`}
+                    />
                 )}
 
                 {/* identity */}
@@ -493,34 +703,48 @@ export default function TargetsIndex({
                         </p>
                     </div>
                     <span
-                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
-                            isOpen
-                                ? 'bg-lux-teal-light text-lux-teal-dark dark:bg-lux-teal/20 dark:text-lux-teal'
-                                : 'bg-muted text-muted-foreground'
-                        }`}
+                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${st.pill}`}
                     >
-                        <span
-                            className={`size-1.5 rounded-full ${isOpen ? 'bg-lux-teal' : 'bg-muted-foreground/50'}`}
-                        />
-                        {target.status_label}
+                        {st.key === 'achieved' ? (
+                            <CheckCircle2 className="size-3.5" />
+                        ) : st.key === 'overdue' ? (
+                            <TriangleAlert className="size-3.5" />
+                        ) : (
+                            <span
+                                className={`size-1.5 rounded-full ${st.dot}`}
+                            />
+                        )}
+                        {st.label}
                     </span>
                 </div>
 
                 {/* focal: progress ring + meta */}
                 <div className="mt-3 flex items-center gap-4 rounded-xl bg-white/40 p-3 dark:bg-white/[0.03]">
-                    <ProgressRing percent={target.percent} />
+                    <ProgressRing
+                        percent={target.percent}
+                        ring={st.ring}
+                        text={st.text}
+                        achieved={st.key === 'achieved'}
+                    />
                     <div className="min-w-0 flex-1 space-y-1.5">
                         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                             <CalendarDays className="size-3.5 shrink-0" />
                             {target.range_label}
                         </p>
-                        <p className="text-sm font-semibold tracking-tight">
-                            {target.done}
-                            <span className="text-muted-foreground">
-                                /{target.total}
-                            </span>{' '}
-                            item selesai
-                        </p>
+                        {st.key === 'achieved' ? (
+                            <p className="flex items-center gap-1 text-sm font-semibold tracking-tight text-emerald-600 dark:text-emerald-400">
+                                <Trophy className="size-3.5 shrink-0" />
+                                Semua item selesai
+                            </p>
+                        ) : (
+                            <p className="text-sm font-semibold tracking-tight">
+                                {target.done}
+                                <span className="text-muted-foreground">
+                                    /{target.total}
+                                </span>{' '}
+                                item selesai
+                            </p>
+                        )}
                         {days && (
                             <span
                                 className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${daysChipClass[days.tone]}`}
@@ -675,6 +899,54 @@ export default function TargetsIndex({
                         </SelectContent>
                     </Select>
 
+                    {/* period preset filter */}
+                    <Select
+                        value={filters.period || 'all'}
+                        onValueChange={(v) =>
+                            applyFilters({
+                                period: v,
+                                from: v === 'custom' ? filters.from : '',
+                                to: v === 'custom' ? filters.to : '',
+                            })
+                        }
+                    >
+                        <SelectTrigger className={`${filterSelectClasses} w-40`}>
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Semua waktu</SelectItem>
+                            <SelectItem value="today">Hari ini</SelectItem>
+                            <SelectItem value="week">Minggu ini</SelectItem>
+                            <SelectItem value="month">Bulan ini</SelectItem>
+                            <SelectItem value="last_month">Bulan lalu</SelectItem>
+                            <SelectItem value="custom">Kustom…</SelectItem>
+                        </SelectContent>
+                    </Select>
+
+                    {filters.period === 'custom' && (
+                        <>
+                            <DatePicker
+                                value={filters.from}
+                                placeholder="Dari"
+                                onChange={(v) => applyFilters({ from: v })}
+                                className="h-9 w-36 rounded-lg"
+                            />
+                            <DatePicker
+                                value={filters.to}
+                                min={filters.from || undefined}
+                                placeholder="Sampai"
+                                onChange={(v) => applyFilters({ to: v })}
+                                className="h-9 w-36 rounded-lg"
+                            />
+                        </>
+                    )}
+
+                    {filters.range_label && (
+                        <span className="rounded-lg bg-lux-teal/10 px-2.5 py-1 text-xs font-medium text-lux-teal-dark dark:text-lux-teal">
+                            {filters.range_label}
+                        </span>
+                    )}
+
                     <div className="ml-auto flex items-center gap-2">
                         <span className="text-xs text-muted-foreground">
                             Kelompokkan
@@ -689,6 +961,7 @@ export default function TargetsIndex({
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
+                                <SelectItem value="week">Minggu</SelectItem>
                                 <SelectItem value="none">Tidak ada</SelectItem>
                                 <SelectItem value="assignee">Anggota</SelectItem>
                                 <SelectItem value="status">Status</SelectItem>
@@ -706,11 +979,22 @@ export default function TargetsIndex({
                         {groups.map((group) => (
                             <div key={group.key}>
                                 {group.label && (
-                                    <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold tracking-tight">
+                                    <h2 className="mb-3 flex flex-wrap items-center gap-2 text-sm font-semibold tracking-tight">
                                         {group.label}
+                                        {group.range && (
+                                            <span className="text-xs font-normal text-muted-foreground">
+                                                {group.range}
+                                            </span>
+                                        )}
                                         <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-normal text-muted-foreground tabular-nums">
                                             {group.items.length}
                                         </span>
+                                        {group.current && (
+                                            <span className="inline-flex items-center gap-1 rounded-full bg-lux-teal-light px-2 py-0.5 text-[11px] font-semibold text-lux-teal-dark dark:bg-lux-teal/20 dark:text-lux-teal">
+                                                <span className="size-1.5 rounded-full bg-lux-teal" />
+                                                Minggu ini
+                                            </span>
+                                        )}
                                     </h2>
                                 )}
                                 <div className="grid gap-4 lg:grid-cols-2">
