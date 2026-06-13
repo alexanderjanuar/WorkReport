@@ -10,6 +10,7 @@ enum Platform: string
     case Facebook = 'facebook';
     case YouTube = 'youtube';
     case Threads = 'threads';
+    case Google = 'google';
 
     /**
      * Human-readable label for the platform.
@@ -23,6 +24,7 @@ enum Platform: string
             self::Facebook => 'Facebook',
             self::YouTube => 'YouTube',
             self::Threads => 'Threads',
+            self::Google => 'Google',
         };
     }
 

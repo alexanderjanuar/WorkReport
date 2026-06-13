@@ -34,7 +34,12 @@ class TargetController extends Controller
         );
 
         $targets = Target::query()
-            ->with(['assignee:id,name', 'creator:id,name', 'items'])
+            ->with([
+                'assignee:id,name',
+                'creator:id,name',
+                // Sum of progress logged against each item, to show delivered/target.
+                'items' => fn ($query) => $query->withSum('reports as delivered', 'quantity'),
+            ])
             ->when(
                 in_array($status, ['open', 'closed'], true),
                 fn ($query) => $query->where('status', $status),
@@ -249,12 +254,20 @@ class TargetController extends Controller
             'done' => $done,
             'total' => $total,
             'percent' => $total > 0 ? (int) round($done / $total * 100) : 0,
-            'items' => $target->items->map(fn ($item) => [
-                'id' => $item->id,
-                'label' => $item->label,
-                'quantity' => $item->quantity,
-                'is_done' => (bool) $item->is_done,
-            ])->values(),
+            'items' => $target->items->map(function ($item) {
+                $delivered = (int) ($item->delivered ?? 0);
+
+                return [
+                    'id' => $item->id,
+                    'label' => $item->label,
+                    'quantity' => $item->quantity,
+                    'delivered' => $delivered,
+                    'remaining' => $item->quantity !== null
+                        ? max(0, $item->quantity - $delivered)
+                        : null,
+                    'is_done' => (bool) $item->is_done,
+                ];
+            })->values(),
         ];
     }
 }

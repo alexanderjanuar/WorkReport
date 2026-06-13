@@ -46,6 +46,8 @@ type ItemRow = {
     id: number;
     label: string;
     quantity: number | null;
+    delivered: number;
+    remaining: number | null;
     is_done: boolean;
 };
 
@@ -779,8 +781,15 @@ export default function TargetsIndex({
                                     {item.label}
                                 </span>
                                 {item.quantity != null && (
-                                    <span className="mt-px shrink-0 rounded-md bg-lux-teal/10 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-lux-teal-dark dark:text-lux-teal">
-                                        {item.quantity}
+                                    <span
+                                        className={`mt-px shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${
+                                            item.remaining === 0
+                                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                                : 'bg-lux-teal/10 text-lux-teal-dark dark:text-lux-teal'
+                                        }`}
+                                        title={`${item.delivered} dari ${item.quantity} tercatat`}
+                                    >
+                                        {item.delivered}/{item.quantity}
                                     </span>
                                 )}
                             </label>
