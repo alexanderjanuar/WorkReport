@@ -1,5 +1,6 @@
-import { Form, Head, Link } from '@inertiajs/react';
+import { Head, Link, usePage } from '@inertiajs/react';
 import { ArrowRight } from 'lucide-react';
+import { useState } from 'react';
 import AppLogoIcon from '@/components/app-logo-icon';
 import InputError from '@/components/input-error';
 import PasswordInput from '@/components/password-input';
@@ -7,6 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { csrfToken } from '@/lib/utils';
 import { home } from '@/routes';
 import { store } from '@/routes/login';
 import { request } from '@/routes/password';
@@ -22,6 +24,13 @@ const inputClasses =
 const labelClasses = 'text-sm font-medium text-foreground/80';
 
 export default function Login({ status, canResetPassword }: Props) {
+    // Native (full-page) submit so the post-login redirect is followed at the
+    // top level — this is immune to the https→http mixed-content block that
+    // silently breaks Inertia's XHR redirect behind an HTTPS proxy.
+    const { action, method } = store.form();
+    const errors = (usePage().props.errors ?? {}) as Record<string, string>;
+    const [submitting, setSubmitting] = useState(false);
+
     return (
         <div className="flex min-h-dvh items-center justify-center px-6 py-12 antialiased">
             <Head title="Masuk — WorkReport" />
@@ -60,94 +69,98 @@ export default function Login({ status, canResetPassword }: Props) {
                         </div>
                     )}
 
-                    <Form
-                        {...store.form()}
-                        resetOnSuccess={['password']}
+                    <form
+                        action={action}
+                        method={method}
+                        onSubmit={() => setSubmitting(true)}
                         className="flex flex-col gap-5"
                     >
-                        {({ processing, errors }) => (
-                            <>
-                                {/* email */}
-                                <div className="grid gap-2">
-                                    <Label htmlFor="email" className={labelClasses}>
-                                        Email
-                                    </Label>
-                                    <Input
-                                        id="email"
-                                        type="email"
-                                        name="email"
-                                        required
-                                        autoFocus
-                                        tabIndex={1}
-                                        autoComplete="email"
-                                        placeholder="nama@email.com"
-                                        className={inputClasses}
-                                    />
-                                    <InputError message={errors.email} />
-                                </div>
+                        <input
+                            type="hidden"
+                            name="_token"
+                            value={csrfToken()}
+                        />
 
-                                {/* password */}
-                                <div className="grid gap-2">
-                                    <div className="flex items-center justify-between">
-                                        <Label
-                                            htmlFor="password"
-                                            className={labelClasses}
-                                        >
-                                            Kata sandi
-                                        </Label>
-                                        {canResetPassword && (
-                                            <Link
-                                                href={request()}
-                                                tabIndex={5}
-                                                className="text-sm font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-lux-teal-dark hover:underline dark:hover:text-lux-teal"
-                                            >
-                                                Lupa kata sandi?
-                                            </Link>
-                                        )}
-                                    </div>
-                                    <PasswordInput
-                                        id="password"
-                                        name="password"
-                                        required
-                                        tabIndex={2}
-                                        autoComplete="current-password"
-                                        placeholder="Masukkan kata sandi"
-                                        className={inputClasses}
-                                    />
-                                    <InputError message={errors.password} />
-                                </div>
+                        {/* email */}
+                        <div className="grid gap-2">
+                            <Label htmlFor="email" className={labelClasses}>
+                                Email
+                            </Label>
+                            <Input
+                                id="email"
+                                type="email"
+                                name="email"
+                                required
+                                autoFocus
+                                tabIndex={1}
+                                autoComplete="email"
+                                placeholder="nama@email.com"
+                                className={inputClasses}
+                            />
+                            <InputError message={errors.email} />
+                        </div>
 
-                                {/* remember */}
-                                <label className="flex cursor-pointer items-center gap-2.5 text-sm text-muted-foreground select-none">
-                                    <Checkbox
-                                        id="remember"
-                                        name="remember"
-                                        tabIndex={3}
-                                        className="border-border data-[state=checked]:border-lux-teal data-[state=checked]:bg-lux-teal"
-                                    />
-                                    Ingat saya di perangkat ini
-                                </label>
-
-                                {/* submit */}
-                                <button
-                                    type="submit"
-                                    tabIndex={4}
-                                    disabled={processing}
-                                    data-test="login-button"
-                                    className="group mt-1 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-[#16c2ad] to-lux-teal-dark text-sm font-semibold text-white shadow-lg shadow-lux-teal/25 transition-all duration-200 hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+                        {/* password */}
+                        <div className="grid gap-2">
+                            <div className="flex items-center justify-between">
+                                <Label
+                                    htmlFor="password"
+                                    className={labelClasses}
                                 >
-                                    {processing ? (
-                                        <Spinner />
-                                    ) : (
-                                        <>
-                                            Masuk
-                                            <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
-                                        </>
-                                    )}
-                                </button>
-                            </>
-                        )}
-                    </Form>
+                                    Kata sandi
+                                </Label>
+                                {canResetPassword && (
+                                    <Link
+                                        href={request()}
+                                        tabIndex={5}
+                                        className="text-sm font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-lux-teal-dark hover:underline dark:hover:text-lux-teal"
+                                    >
+                                        Lupa kata sandi?
+                                    </Link>
+                                )}
+                            </div>
+                            <PasswordInput
+                                id="password"
+                                name="password"
+                                required
+                                tabIndex={2}
+                                autoComplete="current-password"
+                                placeholder="Masukkan kata sandi"
+                                className={inputClasses}
+                            />
+                            <InputError message={errors.password} />
+                        </div>
+
+                        {/* remember */}
+                        <label className="flex cursor-pointer items-center gap-2.5 text-sm text-muted-foreground select-none">
+                            <Checkbox
+                                id="remember"
+                                name="remember"
+                                value="on"
+                                tabIndex={3}
+                                className="border-border data-[state=checked]:border-lux-teal data-[state=checked]:bg-lux-teal"
+                            />
+                            Ingat saya di perangkat ini
+                        </label>
+
+                        {/* submit */}
+                        <button
+                            type="submit"
+                            tabIndex={4}
+                            disabled={submitting}
+                            data-test="login-button"
+                            className="group mt-1 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-[#16c2ad] to-lux-teal-dark text-sm font-semibold text-white shadow-lg shadow-lux-teal/25 transition-all duration-200 hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {submitting ? (
+                                <Spinner />
+                            ) : (
+                                <>
+                                    Masuk
+                                    <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+                                </>
+                            )}
+                        </button>
+                    </form>
                 </div>
 
                 {/* helper */}

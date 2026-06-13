@@ -1,4 +1,4 @@
-import { Link, router } from '@inertiajs/react';
+import { Link } from '@inertiajs/react';
 import { LogOut, Settings } from 'lucide-react';
 import {
     DropdownMenuGroup,
@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { UserInfo } from '@/components/user-info';
 import { useMobileNavigation } from '@/hooks/use-mobile-navigation';
+import { csrfToken } from '@/lib/utils';
 import { logout } from '@/routes';
 import { edit } from '@/routes/profile';
 import type { User } from '@/types';
@@ -19,9 +20,25 @@ type Props = {
 export function UserMenuContent({ user }: Props) {
     const cleanup = useMobileNavigation();
 
+    // Build + submit a native form so the logout redirect is followed at the
+    // top level (immune to the https→http mixed-content block that breaks
+    // Inertia XHR redirects behind an HTTPS proxy). Done programmatically so
+    // the dropdown closing can't interrupt it.
     const handleLogout = () => {
         cleanup();
-        router.flushAll();
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = logout().url;
+        form.style.display = 'none';
+
+        const token = document.createElement('input');
+        token.type = 'hidden';
+        token.name = '_token';
+        token.value = csrfToken();
+        form.appendChild(token);
+
+        document.body.appendChild(form);
+        form.submit();
     };
 
     return (
@@ -46,17 +63,16 @@ export function UserMenuContent({ user }: Props) {
                 </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem asChild>
-                <Link
-                    className="block w-full cursor-pointer"
-                    href={logout()}
-                    as="button"
-                    onClick={handleLogout}
-                    data-test="logout-button"
-                >
-                    <LogOut className="mr-2" />
-                    Keluar
-                </Link>
+            <DropdownMenuItem
+                onSelect={(e) => {
+                    e.preventDefault();
+                    handleLogout();
+                }}
+                data-test="logout-button"
+                className="cursor-pointer"
+            >
+                <LogOut className="mr-2" />
+                Keluar
             </DropdownMenuItem>
         </>
     );
