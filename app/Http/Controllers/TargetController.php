@@ -225,7 +225,7 @@ class TargetController extends Controller
             'items' => ['required', 'array', 'min:1'],
             'items.*.id' => ['nullable', 'integer'],
             'items.*.label' => ['required', 'string', 'max:255'],
-            'items.*.quantity' => ['required', 'integer', 'min:1', 'max:1000000'],
+            'items.*.quantity' => ['nullable', 'integer', 'min:0', 'max:1000000'],
         ];
     }
 

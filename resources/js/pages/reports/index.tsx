@@ -151,7 +151,10 @@ export default function ReportsIndex({ targets, platformOptions, today }: Props)
     const itemOptions = (logging?.items ?? []).map((i) => ({
         value: String(i.id),
         label: i.label,
-        hint: i.quantity != null ? `sisa ${i.remaining}/${i.quantity}` : undefined,
+        hint:
+            i.quantity != null && i.quantity > 0
+                ? `sisa ${i.remaining}/${i.quantity}`
+                : undefined,
     }));
 
     const openLog = (target: TargetCard) => {
@@ -279,7 +282,8 @@ export default function ReportsIndex({ targets, platformOptions, today }: Props)
                                             >
                                                 {item.label}
                                             </span>
-                                            {item.quantity != null && (
+                                            {item.quantity != null &&
+                                                item.quantity > 0 && (
                                                 <span
                                                     className={`mt-px shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${
                                                         item.remaining === 0

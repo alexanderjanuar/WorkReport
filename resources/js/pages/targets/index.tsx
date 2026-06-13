@@ -607,7 +607,7 @@ export default function TargetsIndex({
                             <div className="grid gap-1">
                                 <Input
                                     type="number"
-                                    min={1}
+                                    min={0}
                                     value={item.quantity}
                                     onChange={(e) =>
                                         setItemField(
@@ -619,7 +619,7 @@ export default function TargetsIndex({
                                                 : Number(e.target.value),
                                         )
                                     }
-                                    placeholder="Jml"
+                                    placeholder="Jml (opsional)"
                                     className={fieldClasses}
                                 />
                                 <InputError
@@ -780,7 +780,7 @@ export default function TargetsIndex({
                                 >
                                     {item.label}
                                 </span>
-                                {item.quantity != null && (
+                                {item.quantity != null && item.quantity > 0 && (
                                     <span
                                         className={`mt-px shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${
                                             item.remaining === 0
