@@ -68,10 +68,13 @@ class ReportController extends Controller
                     'reports' => $target->reports->map(fn (Report $report) => [
                         'id' => $report->id,
                         'reported_on' => $report->reported_on->translatedFormat('d M Y'),
+                        'date' => $report->reported_on->toDateString(),
+                        'platform' => $report->platform->value,
                         'platform_label' => $report->platform->label(),
                         'quantity' => $report->quantity,
                         'post_url' => $report->post_url,
                         'note' => $report->note,
+                        'target_item_id' => $report->target_item_id,
                         'item_label' => $report->targetItem?->label ?? $report->item_label,
                     ])->values(),
                 ];
@@ -151,6 +154,79 @@ class ReportController extends Controller
 
             // Keep a single shared note per (target, date): a non-empty note
             // from this submission overwrites the whole day's entries.
+            if ($note !== '') {
+                $target->reports()
+                    ->where('reported_on', $date)
+                    ->update(['note' => $note]);
+            }
+        });
+
+        return back();
+    }
+
+    /**
+     * Edit a single progress entry. The owner may edit their own; admin/ketua
+     * may edit anyone's. Item draw-down totals recalculate automatically because
+     * `delivered` is a live `withSum` of the linked reports (not stored).
+     */
+    public function update(Request $request, Report $report): RedirectResponse
+    {
+        $user = $request->user();
+        abort_unless($report->user_id === $user->id || $user->canManageUsers(), 403);
+
+        $target = $report->target;
+
+        $validated = $request->validate([
+            'reported_on' => ['required', 'date'],
+            'platform' => ['required', Rule::enum(Platform::class)],
+            'quantity' => ['required', 'integer', 'min:1', 'max:1000000'],
+            'post_url' => ['nullable', 'url', 'max:2048'],
+            'note' => ['nullable', 'string', 'max:2000'],
+            'target_item_id' => ['nullable', 'integer'],
+            'item_label' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $date = $validated['reported_on'];
+        if (
+            $date < $target->start_date->toDateString()
+            || $date > $target->end_date->toDateString()
+        ) {
+            throw ValidationException::withMessages([
+                'reported_on' => 'Tanggal di luar rentang target.',
+            ]);
+        }
+
+        if (
+            ! empty($validated['target_item_id'])
+            && ! $target->items()->whereKey($validated['target_item_id'])->exists()
+        ) {
+            throw ValidationException::withMessages([
+                'target_item_id' => 'Item target tidak valid.',
+            ]);
+        }
+
+        $note = trim((string) ($validated['note'] ?? ''));
+
+        $attributes = [
+            'reported_on' => $date,
+            'platform' => $validated['platform'],
+            'quantity' => $validated['quantity'],
+            'post_url' => $validated['post_url'] ?? null,
+            'note' => $note !== '' ? $note : null,
+        ];
+
+        // Only touch the activity link/label when the form actually sends them
+        // (the member's modal does; the oversight table's modal does not).
+        if ($request->has('target_item_id') || $request->has('item_label')) {
+            $label = trim((string) ($validated['item_label'] ?? ''));
+            $attributes['target_item_id'] = $validated['target_item_id'] ?: null;
+            $attributes['item_label'] = $label !== '' ? $label : null;
+        }
+
+        DB::transaction(function () use ($report, $target, $attributes, $note, $date) {
+            $report->update($attributes);
+
+            // Keep one shared note per (target, date).
             if ($note !== '') {
                 $target->reports()
                     ->where('reported_on', $date)

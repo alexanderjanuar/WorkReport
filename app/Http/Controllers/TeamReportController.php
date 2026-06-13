@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\Platform;
 use App\Models\Report;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -41,12 +42,17 @@ class TeamReportController extends Controller
             ->through(fn (Report $report) => [
                 'id' => $report->id,
                 'reported_on' => $report->reported_on->translatedFormat('d M Y'),
+                'date' => $report->reported_on->toDateString(),
                 'date_label' => $report->reported_on->translatedFormat('l, d M Y'),
                 'user' => $report->user?->name,
                 'item_label' => $report->targetItem?->label ?? $report->item_label,
+                'platform' => $report->platform->value,
                 'platform_label' => $report->platform->label(),
                 'quantity' => $report->quantity,
                 'post_url' => $report->post_url,
+                'note' => $report->note,
+                'target_start' => $report->target?->start_date->toDateString(),
+                'target_end' => $report->target?->end_date->toDateString(),
                 'target_range' => $report->target
                     ? $report->target->start_date->translatedFormat('d M').' – '.$report->target->end_date->translatedFormat('d M Y')
                     : null,
@@ -54,6 +60,7 @@ class TeamReportController extends Controller
 
         return Inertia::render('reports/team', [
             'reports' => $reports,
+            'platformOptions' => Platform::options(),
             'filters' => [
                 'search' => $search,
                 'date' => $date ? Carbon::parse($date)->toDateString() : '',

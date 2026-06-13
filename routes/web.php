@@ -21,6 +21,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('reports', [ReportController::class, 'index'])->name('reports.index');
     Route::get('reports/riwayat', [ReportController::class, 'history'])->name('reports.history');
     Route::post('reports', [ReportController::class, 'store'])->name('reports.store');
+    Route::patch('reports/{report}', [ReportController::class, 'update'])->name('reports.update');
     Route::delete('reports/{report}', [ReportController::class, 'destroy'])->name('reports.destroy');
 
     // Target & user management — admin and ketua tim only.
