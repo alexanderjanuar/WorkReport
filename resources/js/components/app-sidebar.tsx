@@ -3,6 +3,8 @@ import {
     ClipboardList,
     History,
     LayoutGrid,
+    MessageSquare,
+    MessagesSquare,
     Table2,
     Target,
     Users,
@@ -43,6 +45,11 @@ export function AppSidebar() {
                       icon: ClipboardList,
                   } satisfies NavItem,
                   {
+                      title: 'Komentar',
+                      href: '/komentar',
+                      icon: MessageSquare,
+                  } satisfies NavItem,
+                  {
                       title: 'Riwayat',
                       href: '/reports/riwayat',
                       icon: History,
@@ -59,6 +66,11 @@ export function AppSidebar() {
                       title: 'Laporan Harian',
                       href: '/laporan',
                       icon: Table2,
+                  } satisfies NavItem,
+                  {
+                      title: 'Komentar Tim',
+                      href: '/komentar-tim',
+                      icon: MessagesSquare,
                   } satisfies NavItem,
                   {
                       title: 'Manajemen User',

@@ -29,6 +29,16 @@ enum Platform: string
     }
 
     /**
+     * All platform values (e.g. for whitelist checks).
+     *
+     * @return array<int, string>
+     */
+    public static function values(): array
+    {
+        return array_column(self::cases(), 'value');
+    }
+
+    /**
      * All platforms as { value, label } pairs (e.g. for select inputs).
      *
      * @return array<int, array{value: string, label: string}>

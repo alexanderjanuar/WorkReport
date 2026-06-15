@@ -1,8 +1,10 @@
 <?php
 
+use App\Http\Controllers\CommentController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\TargetController;
+use App\Http\Controllers\TeamCommentController;
 use App\Http\Controllers\TeamReportController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Auth;
@@ -24,6 +26,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::patch('reports/{report}', [ReportController::class, 'update'])->name('reports.update');
     Route::delete('reports/{report}', [ReportController::class, 'destroy'])->name('reports.destroy');
 
+    // Comments — every member logs the comments they distributed to posts.
+    Route::get('komentar', [CommentController::class, 'index'])->name('comments.index');
+    Route::post('komentar', [CommentController::class, 'store'])->name('comments.store');
+    Route::patch('komentar/{comment}', [CommentController::class, 'update'])->name('comments.update');
+    Route::delete('komentar/{comment}', [CommentController::class, 'destroy'])->name('comments.destroy');
+
     // Target & user management — admin and ketua tim only.
     Route::middleware('role:admin,ketua_tim')->group(function () {
         Route::get('targets', [TargetController::class, 'index'])->name('targets.index');
@@ -35,6 +43,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         // Oversight: all members' daily progress in a table.
         Route::get('laporan', [TeamReportController::class, 'index'])->name('reports.team');
+
+        // Oversight: all members' distributed comments.
+        Route::get('komentar-tim', [TeamCommentController::class, 'index'])->name('comments.team');
 
         Route::get('users', [UserController::class, 'index'])->name('users.index');
         Route::post('users', [UserController::class, 'store'])->name('users.store');

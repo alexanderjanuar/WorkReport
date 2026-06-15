@@ -84,4 +84,12 @@ class User extends Authenticatable implements PasskeyUser
     {
         return $this->hasMany(Target::class);
     }
+
+    /**
+     * Comments this user distributed to posts.
+     */
+    public function comments(): HasMany
+    {
+        return $this->hasMany(Comment::class);
+    }
 }
