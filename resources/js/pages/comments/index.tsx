@@ -1,13 +1,16 @@
 import { Head, router, useForm } from '@inertiajs/react';
 import {
+    AtSign,
     ExternalLink,
+    Image as ImageIcon,
     Inbox,
     Link2,
     Pencil,
     Plus,
     Trash2,
+    Upload,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import InputError from '@/components/input-error';
 import { PageHeader, primaryButtonClass } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
@@ -31,10 +34,12 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
+import { Textarea } from '@/components/ui/textarea';
 import { dashboard } from '@/routes';
 
 type Option = { value: string; label: string };
 type TargetOption = { value: number; label: string };
+type MediaOption = { value: number; label: string; platform: string };
 
 type CommentRow = {
     id: number;
@@ -42,8 +47,13 @@ type CommentRow = {
     date: string;
     platform: string;
     platform_label: string;
+    quantity: number;
     post_url: string;
     proof_url: string | null;
+    has_proof: boolean;
+    media_id: number | null;
+    media: string | null;
+    media_logo: string | null;
     target_id: number | null;
     target_range: string | null;
 };
@@ -60,6 +70,7 @@ type Props = {
     comments: Paginated<CommentRow>;
     platformOptions: Option[];
     targetOptions: TargetOption[];
+    mediaOptions: MediaOption[];
     filters: { platform: string; date: string };
     today: string;
 };
@@ -75,8 +86,10 @@ const iconClasses =
 type FormData = {
     commented_on: string;
     platform: string;
+    quantity: number | '';
     post_url: string;
-    proof_url: string;
+    proof: File | null;
+    media_id: number | '';
     target_id: number | '';
 };
 
@@ -84,31 +97,65 @@ export default function CommentsIndex({
     comments,
     platformOptions,
     targetOptions,
+    mediaOptions,
     filters,
     today,
 }: Props) {
     const [open, setOpen] = useState(false);
     const [editing, setEditing] = useState<CommentRow | null>(null);
+    const [proofPreview, setProofPreview] = useState<string | null>(null);
+    const proofFileRef = useRef<HTMLInputElement>(null);
 
     const form = useForm<FormData>({
         commented_on: today,
         platform: platformOptions[0]?.value ?? '',
+        quantity: 1,
         post_url: '',
-        proof_url: '',
+        proof: null,
+        media_id: '',
         target_id: '',
     });
     const err = (key: string) => (form.errors as Record<string, string>)[key];
+
+    const onPickProof = (file: File | null) => {
+        form.setData('proof', file);
+        setProofPreview(
+            file
+                ? URL.createObjectURL(file)
+                : editing?.has_proof
+                  ? (editing.proof_url ?? null)
+                  : null,
+        );
+    };
+
+    // Picking a media auto-fills the platform to keep them consistent.
+    const onSelectMedia = (value: string) => {
+        if (value === 'none') {
+            form.setData('media_id', '');
+            return;
+        }
+        const m = mediaOptions.find((o) => String(o.value) === value);
+        form.setData({
+            ...form.data,
+            media_id: Number(value),
+            platform: m?.platform ?? form.data.platform,
+        });
+    };
 
     const openCreate = () => {
         form.clearErrors();
         form.setData({
             commented_on: today,
             platform: platformOptions[0]?.value ?? '',
+            quantity: 1,
             post_url: '',
-            proof_url: '',
+            proof: null,
+            media_id: '',
             target_id: '',
         });
         setEditing(null);
+        setProofPreview(null);
+        if (proofFileRef.current) proofFileRef.current.value = '';
         setOpen(true);
     };
 
@@ -117,11 +164,15 @@ export default function CommentsIndex({
         form.setData({
             commented_on: row.date,
             platform: row.platform,
+            quantity: row.quantity,
             post_url: row.post_url,
-            proof_url: row.proof_url ?? '',
+            proof: null,
+            media_id: row.media_id ?? '',
             target_id: row.target_id ?? '',
         });
         setEditing(row);
+        setProofPreview(row.has_proof ? (row.proof_url ?? null) : null);
+        if (proofFileRef.current) proofFileRef.current.value = '';
         setOpen(true);
     };
 
@@ -129,20 +180,82 @@ export default function CommentsIndex({
         e.preventDefault();
         const opts = {
             preserveScroll: true,
+            forceFormData: true,
             onSuccess: () => {
                 setOpen(false);
                 form.reset();
+                setProofPreview(null);
             },
         };
         if (editing) {
-            form.patch(`/komentar/${editing.id}`, opts);
+            // PATCH + file upload → POST with method spoofing.
+            form.transform((data) => ({ ...data, _method: 'patch' }));
+            form.post(`/komentar/${editing.id}`, opts);
         } else {
+            form.transform((data) => data);
             form.post('/komentar', opts);
         }
     };
 
     const remove = (id: number) =>
         router.delete(`/komentar/${id}`, { preserveScroll: true });
+
+    // ── quick-add a media account without leaving the comment modal ────────
+    const [mediaModalOpen, setMediaModalOpen] = useState(false);
+    const mediaFileRef = useRef<HTMLInputElement>(null);
+    const mediaForm = useForm<{
+        name: string;
+        platform: string;
+        url: string;
+        note: string;
+        logo: File | null;
+    }>({
+        name: '',
+        platform: platformOptions[0]?.value ?? '',
+        url: '',
+        note: '',
+        logo: null,
+    });
+    const mediaErr = (key: string) =>
+        (mediaForm.errors as Record<string, string>)[key];
+
+    const openMediaModal = () => {
+        mediaForm.clearErrors();
+        mediaForm.setData({
+            name: '',
+            // default to the platform already chosen for the comment
+            platform: form.data.platform || platformOptions[0]?.value || '',
+            url: '',
+            note: '',
+            logo: null,
+        });
+        if (mediaFileRef.current) mediaFileRef.current.value = '';
+        setMediaModalOpen(true);
+    };
+
+    const submitMedia = (e: React.FormEvent) => {
+        e.preventDefault();
+        const prevIds = new Set(mediaOptions.map((o) => o.value));
+        mediaForm.post('/media', {
+            preserveScroll: true,
+            forceFormData: true,
+            onSuccess: (page) => {
+                setMediaModalOpen(false);
+                mediaForm.reset();
+                // auto-select the freshly created media in the comment form
+                const next = (page.props as { mediaOptions?: MediaOption[] })
+                    .mediaOptions;
+                const created = next?.find((o) => !prevIds.has(o.value));
+                if (created) {
+                    form.setData({
+                        ...form.data,
+                        media_id: created.value,
+                        platform: created.platform,
+                    });
+                }
+            },
+        });
+    };
 
     const applyFilter = (next: { platform?: string; date?: string }) => {
         router.get(
@@ -239,6 +352,12 @@ export default function CommentsIndex({
                                         Platform
                                     </th>
                                     <th className="px-4 py-3 font-semibold">
+                                        Media
+                                    </th>
+                                    <th className="px-4 py-3 text-right font-semibold">
+                                        Jumlah
+                                    </th>
+                                    <th className="px-4 py-3 font-semibold">
                                         Post
                                     </th>
                                     <th className="px-4 py-3 font-semibold">
@@ -255,7 +374,7 @@ export default function CommentsIndex({
                             <tbody>
                                 {comments.data.length === 0 ? (
                                     <tr>
-                                        <td colSpan={6} className="px-4 py-16">
+                                        <td colSpan={8} className="px-4 py-16">
                                             <div className="flex flex-col items-center gap-3 text-center">
                                                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted">
                                                     <Inbox className="h-6 w-6 text-muted-foreground" />
@@ -286,6 +405,31 @@ export default function CommentsIndex({
                                                 {row.platform_label}
                                             </td>
                                             <td className="px-4 py-3">
+                                                {row.media ? (
+                                                    <span className="inline-flex items-center gap-2 text-foreground/80">
+                                                        {row.media_logo ? (
+                                                            <img
+                                                                src={
+                                                                    row.media_logo
+                                                                }
+                                                                alt={row.media}
+                                                                className="h-5 w-5 shrink-0 rounded-full object-cover ring-1 ring-border"
+                                                            />
+                                                        ) : (
+                                                            <AtSign className="h-3.5 w-3.5 text-muted-foreground" />
+                                                        )}
+                                                        {row.media}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-muted-foreground">
+                                                        —
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                                                {row.quantity}
+                                            </td>
+                                            <td className="px-4 py-3">
                                                 <a
                                                     href={row.post_url}
                                                     target="_blank"
@@ -302,10 +446,13 @@ export default function CommentsIndex({
                                                         href={row.proof_url}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
-                                                        className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                                                        title="Lihat bukti"
                                                     >
-                                                        Bukti
-                                                        <ExternalLink className="h-3.5 w-3.5" />
+                                                        <img
+                                                            src={row.proof_url}
+                                                            alt="Bukti"
+                                                            className="h-9 w-9 rounded-md object-cover ring-1 ring-border transition hover:ring-lux-teal"
+                                                        />
                                                     </a>
                                                 ) : (
                                                     <span className="text-muted-foreground">
@@ -447,6 +594,125 @@ export default function CommentsIndex({
                             </div>
                         </div>
 
+                        {/* jumlah + target */}
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="grid gap-2">
+                                <Label
+                                    htmlFor="c-qty"
+                                    className={labelClasses}
+                                >
+                                    Jumlah komentar
+                                </Label>
+                                <Input
+                                    id="c-qty"
+                                    type="number"
+                                    min={1}
+                                    value={form.data.quantity}
+                                    onChange={(e) =>
+                                        form.setData(
+                                            'quantity',
+                                            e.target.value === ''
+                                                ? ''
+                                                : Number(e.target.value),
+                                        )
+                                    }
+                                    placeholder="mis. 10"
+                                    className={fieldClasses}
+                                />
+                                <InputError message={err('quantity')} />
+                            </div>
+                            <div className="grid gap-2">
+                                <Label className={labelClasses}>
+                                    Target{' '}
+                                    <span className="font-normal text-muted-foreground">
+                                        (opsional)
+                                    </span>
+                                </Label>
+                                <Select
+                                    value={
+                                        form.data.target_id === ''
+                                            ? 'none'
+                                            : String(form.data.target_id)
+                                    }
+                                    onValueChange={(v) =>
+                                        form.setData(
+                                            'target_id',
+                                            v === 'none' ? '' : Number(v),
+                                        )
+                                    }
+                                >
+                                    <SelectTrigger className={selectClasses}>
+                                        <SelectValue placeholder="Tanpa target" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none">
+                                            Tanpa target
+                                        </SelectItem>
+                                        {targetOptions.map((o) => (
+                                            <SelectItem
+                                                key={o.value}
+                                                value={String(o.value)}
+                                            >
+                                                {o.label}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <InputError message={err('target_id')} />
+                            </div>
+                        </div>
+
+                        {/* media (akun) + quick add */}
+                        <div className="grid gap-2">
+                            <Label className={labelClasses}>
+                                Media{' '}
+                                <span className="font-normal text-muted-foreground">
+                                    (akun yang dipakai)
+                                </span>
+                            </Label>
+                            <div className="flex items-center gap-2">
+                                <div className="flex-1">
+                                    <Select
+                                        value={
+                                            form.data.media_id === ''
+                                                ? 'none'
+                                                : String(form.data.media_id)
+                                        }
+                                        onValueChange={onSelectMedia}
+                                    >
+                                        <SelectTrigger className={selectClasses}>
+                                            <SelectValue placeholder="Pilih media" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="none">
+                                                Tanpa media
+                                            </SelectItem>
+                                            {mediaOptions.map((o) => (
+                                                <SelectItem
+                                                    key={o.value}
+                                                    value={String(o.value)}
+                                                >
+                                                    {o.label}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={openMediaModal}
+                                    title="Tambah media baru"
+                                    className="h-11 w-11 shrink-0 rounded-xl"
+                                >
+                                    <Plus className="h-4 w-4" />
+                                </Button>
+                            </div>
+                            <InputError message={err('media_id')} />
+                        </div>
+
+                        {/* link post */}
                         <div className="grid gap-2">
                             <Label htmlFor="c-post" className={labelClasses}>
                                 Link post
@@ -467,67 +733,66 @@ export default function CommentsIndex({
                             <InputError message={err('post_url')} />
                         </div>
 
-                        <div className="grid gap-2">
-                            <Label htmlFor="c-proof" className={labelClasses}>
-                                Bukti{' '}
-                                <span className="font-normal text-muted-foreground">
-                                    (opsional)
-                                </span>
-                            </Label>
-                            <div className="relative">
-                                <Link2 className={iconClasses} />
-                                <Input
-                                    id="c-proof"
-                                    type="url"
-                                    value={form.data.proof_url}
-                                    onChange={(e) =>
-                                        form.setData('proof_url', e.target.value)
-                                    }
-                                    placeholder="https://… (screenshot/link bukti)"
-                                    className={`${fieldClasses} pr-3 pl-10`}
-                                />
-                            </div>
-                            <InputError message={err('proof_url')} />
-                        </div>
-
+                        {/* bukti screenshot */}
                         <div className="grid gap-2">
                             <Label className={labelClasses}>
-                                Target{' '}
+                                Bukti screenshot{' '}
                                 <span className="font-normal text-muted-foreground">
                                     (opsional)
                                 </span>
                             </Label>
-                            <Select
-                                value={
-                                    form.data.target_id === ''
-                                        ? 'none'
-                                        : String(form.data.target_id)
-                                }
-                                onValueChange={(v) =>
-                                    form.setData(
-                                        'target_id',
-                                        v === 'none' ? '' : Number(v),
-                                    )
-                                }
-                            >
-                                <SelectTrigger className={selectClasses}>
-                                    <SelectValue placeholder="Tanpa target" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="none">
-                                        Tanpa target
-                                    </SelectItem>
-                                    {targetOptions.map((o) => (
-                                        <SelectItem
-                                            key={o.value}
-                                            value={String(o.value)}
-                                        >
-                                            {o.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                            <InputError message={err('target_id')} />
+                            <div className="flex items-center gap-4">
+                                {proofPreview ? (
+                                    <a
+                                        href={proofPreview}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="shrink-0"
+                                        title="Lihat bukti"
+                                    >
+                                        <img
+                                            src={proofPreview}
+                                            alt="Pratinjau bukti"
+                                            className="h-16 w-16 rounded-xl object-cover ring-1 ring-border"
+                                        />
+                                    </a>
+                                ) : (
+                                    <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-lux-teal/10 text-lux-teal-dark dark:text-lux-teal">
+                                        <ImageIcon className="h-6 w-6" />
+                                    </span>
+                                )}
+                                <div className="space-y-1">
+                                    <input
+                                        ref={proofFileRef}
+                                        type="file"
+                                        accept="image/*"
+                                        className="hidden"
+                                        onChange={(e) =>
+                                            onPickProof(
+                                                e.target.files?.[0] ?? null,
+                                            )
+                                        }
+                                    />
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="gap-1.5 rounded-lg"
+                                        onClick={() =>
+                                            proofFileRef.current?.click()
+                                        }
+                                    >
+                                        <Upload className="h-3.5 w-3.5" />
+                                        {proofPreview
+                                            ? 'Ganti screenshot'
+                                            : 'Unggah screenshot'}
+                                    </Button>
+                                    <p className="text-[11px] text-muted-foreground">
+                                        PNG/JPG, maks 4 MB.
+                                    </p>
+                                </div>
+                            </div>
+                            <InputError message={err('proof')} />
                         </div>
 
                         <DialogFooter className="gap-2">
@@ -539,6 +804,162 @@ export default function CommentsIndex({
                             <Button type="submit" disabled={form.processing}>
                                 {form.processing && <Spinner />}
                                 Simpan
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
+            {/* quick-add media dialog (opens on top of the comment modal) */}
+            <Dialog open={mediaModalOpen} onOpenChange={setMediaModalOpen}>
+                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Tambah Media</DialogTitle>
+                        <DialogDescription>
+                            Buat akun media baru, langsung terpilih untuk
+                            komentar ini.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={submitMedia} className="space-y-5">
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="grid gap-2">
+                                <Label
+                                    htmlFor="qm-name"
+                                    className={labelClasses}
+                                >
+                                    Nama akun
+                                </Label>
+                                <Input
+                                    id="qm-name"
+                                    value={mediaForm.data.name}
+                                    onChange={(e) =>
+                                        mediaForm.setData('name', e.target.value)
+                                    }
+                                    placeholder="mis. @brandstore"
+                                    className={fieldClasses}
+                                />
+                                <InputError message={mediaErr('name')} />
+                            </div>
+                            <div className="grid gap-2">
+                                <Label className={labelClasses}>Platform</Label>
+                                <Select
+                                    value={mediaForm.data.platform}
+                                    onValueChange={(v) =>
+                                        mediaForm.setData('platform', v)
+                                    }
+                                >
+                                    <SelectTrigger className={selectClasses}>
+                                        <SelectValue placeholder="Platform" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {platformOptions.map((o) => (
+                                            <SelectItem
+                                                key={o.value}
+                                                value={o.value}
+                                            >
+                                                {o.label}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <InputError message={mediaErr('platform')} />
+                            </div>
+                        </div>
+
+                        <div className="grid gap-2">
+                            <Label htmlFor="qm-url" className={labelClasses}>
+                                Link akun{' '}
+                                <span className="font-normal text-muted-foreground">
+                                    (opsional)
+                                </span>
+                            </Label>
+                            <div className="relative">
+                                <Link2 className={iconClasses} />
+                                <Input
+                                    id="qm-url"
+                                    type="url"
+                                    value={mediaForm.data.url}
+                                    onChange={(e) =>
+                                        mediaForm.setData('url', e.target.value)
+                                    }
+                                    placeholder="https://instagram.com/brandstore"
+                                    className={`${fieldClasses} pr-3 pl-10`}
+                                />
+                            </div>
+                            <InputError message={mediaErr('url')} />
+                        </div>
+
+                        <div className="grid gap-2">
+                            <Label htmlFor="qm-note" className={labelClasses}>
+                                Catatan{' '}
+                                <span className="font-normal text-muted-foreground">
+                                    (opsional)
+                                </span>
+                            </Label>
+                            <Textarea
+                                id="qm-note"
+                                value={mediaForm.data.note}
+                                onChange={(e) =>
+                                    mediaForm.setData('note', e.target.value)
+                                }
+                                rows={2}
+                                placeholder="Catatan singkat tentang akun ini…"
+                                className="rounded-xl border-border bg-white/60 text-sm shadow-none focus-visible:border-lux-teal focus-visible:ring-2 focus-visible:ring-lux-teal/20 dark:bg-white/5"
+                            />
+                            <InputError message={mediaErr('note')} />
+                        </div>
+
+                        <div className="grid gap-2">
+                            <Label className={labelClasses}>
+                                Logo{' '}
+                                <span className="font-normal text-muted-foreground">
+                                    (opsional)
+                                </span>
+                            </Label>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    ref={mediaFileRef}
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={(e) =>
+                                        mediaForm.setData(
+                                            'logo',
+                                            e.target.files?.[0] ?? null,
+                                        )
+                                    }
+                                />
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="gap-1.5 rounded-lg"
+                                    onClick={() => mediaFileRef.current?.click()}
+                                >
+                                    <Upload className="h-3.5 w-3.5" />
+                                    Pilih logo
+                                </Button>
+                                {mediaForm.data.logo && (
+                                    <span className="truncate text-xs text-muted-foreground">
+                                        {mediaForm.data.logo.name}
+                                    </span>
+                                )}
+                            </div>
+                            <InputError message={mediaErr('logo')} />
+                        </div>
+
+                        <DialogFooter className="gap-2">
+                            <DialogClose asChild>
+                                <Button type="button" variant="secondary">
+                                    Batal
+                                </Button>
+                            </DialogClose>
+                            <Button
+                                type="submit"
+                                disabled={mediaForm.processing}
+                            >
+                                {mediaForm.processing && <Spinner />}
+                                Simpan media
                             </Button>
                         </DialogFooter>
                     </form>

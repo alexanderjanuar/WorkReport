@@ -1,5 +1,6 @@
 import { Link, usePage } from '@inertiajs/react';
 import {
+    AtSign,
     ClipboardList,
     History,
     LayoutGrid,
@@ -71,6 +72,11 @@ export function AppSidebar() {
                       title: 'Komentar Tim',
                       href: '/komentar-tim',
                       icon: MessagesSquare,
+                  } satisfies NavItem,
+                  {
+                      title: 'Media',
+                      href: '/media',
+                      icon: AtSign,
                   } satisfies NavItem,
                   {
                       title: 'Manajemen User',

@@ -6,6 +6,7 @@ use App\Enums\Platform;
 use App\Models\Comment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -21,7 +22,7 @@ class TeamCommentController extends Controller
         $date = $request->input('date');
 
         $comments = Comment::query()
-            ->with(['user:id,name', 'target:id,start_date,end_date'])
+            ->with(['user:id,name', 'target:id,start_date,end_date', 'media:id,name,logo_path'])
             ->when($search !== '', fn ($query) => $query->whereHas(
                 'user',
                 fn ($q) => $q->where('name', 'like', "%{$search}%"),
@@ -40,9 +41,16 @@ class TeamCommentController extends Controller
                 'commented_on' => $comment->commented_on->translatedFormat('d M Y'),
                 'date_label' => $comment->commented_on->translatedFormat('l, d M Y'),
                 'user' => $comment->user?->name,
+                'media' => $comment->media?->name,
+                'media_logo' => $comment->media?->logo_path
+                    ? Storage::disk('public')->url($comment->media->logo_path)
+                    : null,
                 'platform_label' => $comment->platform->label(),
+                'quantity' => $comment->quantity,
                 'post_url' => $comment->post_url,
-                'proof_url' => $comment->proof_url,
+                'proof_url' => $comment->proof_path
+                    ? Storage::disk('public')->url($comment->proof_path)
+                    : $comment->proof_url,
                 'target_range' => $comment->target
                     ? $comment->target->start_date->translatedFormat('d M').' – '.$comment->target->end_date->translatedFormat('d M Y')
                     : null,

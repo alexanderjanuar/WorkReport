@@ -21,7 +21,10 @@ type CommentRow = {
     commented_on: string;
     date_label: string;
     user: string | null;
+    media: string | null;
+    media_logo: string | null;
     platform_label: string;
+    quantity: number;
     post_url: string;
     proof_url: string | null;
     target_range: string | null;
@@ -162,6 +165,12 @@ export default function TeamComments({
                                         Platform
                                     </th>
                                     <th className="px-4 py-3 font-semibold">
+                                        Media
+                                    </th>
+                                    <th className="px-4 py-3 text-right font-semibold">
+                                        Jumlah
+                                    </th>
+                                    <th className="px-4 py-3 font-semibold">
                                         Post
                                     </th>
                                     <th className="px-4 py-3 font-semibold">
@@ -176,7 +185,7 @@ export default function TeamComments({
                                 {comments.data.length === 0 ? (
                                     <tr>
                                         <td
-                                            colSpan={6}
+                                            colSpan={8}
                                             className="px-4 py-16 text-center text-sm text-muted-foreground"
                                         >
                                             Tidak ada komentar yang cocok.
@@ -205,6 +214,29 @@ export default function TeamComments({
                                                 {row.platform_label}
                                             </td>
                                             <td className="px-4 py-3">
+                                                {row.media ? (
+                                                    <span className="inline-flex items-center gap-2 text-foreground/80">
+                                                        {row.media_logo && (
+                                                            <img
+                                                                src={
+                                                                    row.media_logo
+                                                                }
+                                                                alt={row.media}
+                                                                className="h-5 w-5 shrink-0 rounded-full object-cover ring-1 ring-border"
+                                                            />
+                                                        )}
+                                                        {row.media}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-muted-foreground">
+                                                        —
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                                                {row.quantity}
+                                            </td>
+                                            <td className="px-4 py-3">
                                                 <a
                                                     href={row.post_url}
                                                     target="_blank"
@@ -221,10 +253,13 @@ export default function TeamComments({
                                                         href={row.proof_url}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
-                                                        className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                                                        title="Lihat bukti"
                                                     >
-                                                        Bukti
-                                                        <ExternalLink className="h-3.5 w-3.5" />
+                                                        <img
+                                                            src={row.proof_url}
+                                                            alt="Bukti"
+                                                            className="h-9 w-9 rounded-md object-cover ring-1 ring-border transition hover:ring-lux-teal"
+                                                        />
                                                     </a>
                                                 ) : (
                                                     <span className="text-muted-foreground">

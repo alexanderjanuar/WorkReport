@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\CommentController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\MediaController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\TargetController;
 use App\Http\Controllers\TeamCommentController;
@@ -32,6 +33,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::patch('komentar/{comment}', [CommentController::class, 'update'])->name('comments.update');
     Route::delete('komentar/{comment}', [CommentController::class, 'destroy'])->name('comments.destroy');
 
+    // Any member can quick-add a media account (e.g. from the comment modal);
+    // full media management stays admin/ketua only (below).
+    Route::post('media', [MediaController::class, 'store'])->name('media.store');
+
     // Target & user management — admin and ketua tim only.
     Route::middleware('role:admin,ketua_tim')->group(function () {
         Route::get('targets', [TargetController::class, 'index'])->name('targets.index');
@@ -46,6 +51,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         // Oversight: all members' distributed comments.
         Route::get('komentar-tim', [TeamCommentController::class, 'index'])->name('comments.team');
+
+        // Media management (list/edit/delete) — admin/ketua only. Creating a
+        // media is allowed for any member (route registered above).
+        Route::get('media', [MediaController::class, 'index'])->name('media.index');
+        Route::patch('media/{media}', [MediaController::class, 'update'])->name('media.update');
+        Route::delete('media/{media}', [MediaController::class, 'destroy'])->name('media.destroy');
 
         Route::get('users', [UserController::class, 'index'])->name('users.index');
         Route::post('users', [UserController::class, 'store'])->name('users.store');

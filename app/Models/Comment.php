@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['user_id', 'target_id', 'commented_on', 'platform', 'post_url', 'proof_url'])]
+#[Fillable(['user_id', 'target_id', 'media_id', 'commented_on', 'platform', 'quantity', 'post_url', 'proof_url', 'proof_path'])]
 class Comment extends Model
 {
     /**
@@ -18,6 +18,7 @@ class Comment extends Model
         return [
             'commented_on' => 'date',
             'platform' => Platform::class,
+            'quantity' => 'integer',
         ];
     }
 
@@ -35,5 +36,13 @@ class Comment extends Model
     public function target(): BelongsTo
     {
         return $this->belongsTo(Target::class);
+    }
+
+    /**
+     * The media account this comment relates to (optional).
+     */
+    public function media(): BelongsTo
+    {
+        return $this->belongsTo(Media::class);
     }
 }

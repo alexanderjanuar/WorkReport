@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Enums\Platform;
 use App\Models\Comment;
+use App\Models\Media;
 use App\Models\Target;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -24,7 +26,7 @@ class CommentController extends Controller
         $date = $request->input('date');
 
         $comments = $user->comments()
-            ->with('target:id,start_date,end_date')
+            ->with(['target:id,start_date,end_date', 'media:id,name,platform,logo_path'])
             ->when(
                 in_array($platform, Platform::values(), true),
                 fn ($query) => $query->where('platform', $platform),
@@ -40,6 +42,7 @@ class CommentController extends Controller
             'comments' => $comments,
             'platformOptions' => Platform::options(),
             'targetOptions' => $this->targetOptions($user->id),
+            'mediaOptions' => $this->mediaOptions(),
             'filters' => [
                 'platform' => in_array($platform, Platform::values(), true) ? $platform : '',
                 'date' => $date ? Carbon::parse($date)->toDateString() : '',
@@ -50,9 +53,8 @@ class CommentController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
-        $validated = $this->validateComment($request);
-
-        $request->user()->comments()->create($validated);
+        $comment = new Comment(['user_id' => $request->user()->id]);
+        $this->persist($request, $comment);
 
         return back();
     }
@@ -61,7 +63,7 @@ class CommentController extends Controller
     {
         abort_unless($comment->user_id === $request->user()->id, 403);
 
-        $comment->update($this->validateComment($request));
+        $this->persist($request, $comment);
 
         return back();
     }
@@ -70,34 +72,69 @@ class CommentController extends Controller
     {
         abort_unless($comment->user_id === $request->user()->id, 403);
 
+        if ($comment->proof_path) {
+            Storage::disk('public')->delete($comment->proof_path);
+        }
+
         $comment->delete();
 
         return back();
     }
 
     /**
-     * @return array<string, mixed>
+     * Validate + save a comment, handling the optional proof screenshot upload
+     * (replacing the previous file when a new one is uploaded).
      */
-    private function validateComment(Request $request): array
+    private function persist(Request $request, Comment $comment): void
     {
         $validated = $request->validate([
             'commented_on' => ['required', 'date'],
             'platform' => ['required', Rule::enum(Platform::class)],
+            'quantity' => ['required', 'integer', 'min:1', 'max:1000000'],
             'post_url' => ['required', 'url', 'max:2048'],
-            'proof_url' => ['nullable', 'url', 'max:2048'],
+            'proof' => ['nullable', 'image', 'max:4096'], // ≤ 4 MB screenshot
+            'media_id' => ['nullable', Rule::exists('media', 'id')],
             'target_id' => [
                 'nullable',
                 Rule::exists('targets', 'id')->where('user_id', $request->user()->id),
             ],
         ]);
 
-        return [
+        $comment->fill([
             'commented_on' => $validated['commented_on'],
             'platform' => $validated['platform'],
+            'quantity' => $validated['quantity'],
             'post_url' => $validated['post_url'],
-            'proof_url' => $validated['proof_url'] ?? null,
+            'media_id' => ($validated['media_id'] ?? null) ?: null,
             'target_id' => ($validated['target_id'] ?? null) ?: null,
-        ];
+        ]);
+
+        if ($request->hasFile('proof')) {
+            if ($comment->proof_path) {
+                Storage::disk('public')->delete($comment->proof_path);
+            }
+            $comment->proof_path = $request->file('proof')->store('comment-proofs', 'public');
+        }
+
+        $comment->save();
+    }
+
+    /**
+     * Media accounts for the comment form's select.
+     *
+     * @return array<int, array{value: int, label: string, platform: string}>
+     */
+    private function mediaOptions(): array
+    {
+        return Media::orderBy('platform')
+            ->orderBy('name')
+            ->get(['id', 'name', 'platform'])
+            ->map(fn (Media $media) => [
+                'value' => $media->id,
+                'label' => $media->name,
+                'platform' => $media->platform->value,
+            ])
+            ->all();
     }
 
     /**
@@ -129,8 +166,18 @@ class CommentController extends Controller
             'date' => $comment->commented_on->toDateString(),
             'platform' => $comment->platform->value,
             'platform_label' => $comment->platform->label(),
+            'quantity' => $comment->quantity,
             'post_url' => $comment->post_url,
-            'proof_url' => $comment->proof_url,
+            // displayable proof: uploaded screenshot first, legacy URL otherwise
+            'proof_url' => $comment->proof_path
+                ? Storage::disk('public')->url($comment->proof_path)
+                : $comment->proof_url,
+            'has_proof' => (bool) ($comment->proof_path || $comment->proof_url),
+            'media_id' => $comment->media_id,
+            'media' => $comment->media?->name,
+            'media_logo' => $comment->media?->logo_path
+                ? Storage::disk('public')->url($comment->media->logo_path)
+                : null,
             'target_id' => $comment->target_id,
             'target_range' => $comment->target
                 ? $comment->target->start_date->translatedFormat('d M').' – '.$comment->target->end_date->translatedFormat('d M Y')
