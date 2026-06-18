@@ -6,10 +6,11 @@ use App\Enums\Platform;
 use App\Models\Comment;
 use App\Models\Media;
 use App\Models\Target;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -79,6 +80,66 @@ class CommentController extends Controller
         $comment->delete();
 
         return back();
+    }
+
+    /**
+     * Plain-text daily report of the CURRENT user's own comments for a date,
+     * grouped by media account (same "Riport" format as the team export).
+     */
+    public function export(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'date' => ['required', 'date'],
+        ]);
+
+        $user = $request->user();
+        $date = Carbon::parse($validated['date']);
+
+        $media = Media::orderBy('name')->get(['id', 'name']);
+        $comments = $user->comments()
+            ->whereDate('commented_on', $date->toDateString())
+            ->orderBy('id')
+            ->get()
+            ->groupBy('media_id');
+
+        $lines = [];
+        $lines[] = 'Riport '.$date->day.' '.mb_strtolower($date->translatedFormat('F')).', Jam '.now()->format('H.i');
+        $lines[] = 'Cek '.$media->count().' akun media ;';
+        $lines[] = '';
+
+        $renderItems = function ($items) use (&$lines, $user) {
+            if ($items === null || $items->isEmpty()) {
+                $lines[] = '1.';
+                $lines[] = '';
+
+                return;
+            }
+            $n = 1;
+            foreach ($items as $comment) {
+                $lines[] = $n.'. '.$comment->quantity.' komen';
+                $lines[] = $comment->post_url.' ✅ [ '.$user->name.' ]';
+                $lines[] = '';
+                $n++;
+            }
+        };
+
+        foreach ($media as $account) {
+            $lines[] = '- '.$account->name.' :';
+            $lines[] = '';
+            $renderItems($comments->get($account->id));
+        }
+
+        if ($comments->has(null) && $comments->get(null)->isNotEmpty()) {
+            $lines[] = '- Link media lain :';
+            $lines[] = '';
+            $renderItems($comments->get(null));
+        }
+
+        return response()->json([
+            'date' => $date->toDateString(),
+            'filename' => 'riport-komentar-'.$date->toDateString().'.txt',
+            'text' => rtrim(implode("\n", $lines))."\n",
+        ]);
     }
 
     /**

@@ -1,10 +1,20 @@
 import { Head, router } from '@inertiajs/react';
-import { ExternalLink, Search } from 'lucide-react';
+import { Check, Copy, Download, ExternalLink, Search } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { PageHeader } from '@/components/page-header';
+import { PageHeader, primaryButtonClass } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { DatePicker } from '@/components/ui/date-picker';
+import {
+    Dialog,
+    DialogClose,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
     Select,
     SelectContent,
@@ -12,6 +22,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { Spinner } from '@/components/ui/spinner';
+import { Textarea } from '@/components/ui/textarea';
 import { dashboard } from '@/routes';
 
 type Option = { value: string; label: string };
@@ -42,6 +54,7 @@ type Props = {
     comments: Paginated<CommentRow>;
     platformOptions: Option[];
     filters: { search: string; platform: string; date: string };
+    today: string;
 };
 
 const initials = (name: string | null) =>
@@ -51,9 +64,67 @@ export default function TeamComments({
     comments,
     platformOptions,
     filters,
+    today,
 }: Props) {
     const [search, setSearch] = useState(filters.search ?? '');
     const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // ── export daily report ───────────────────────────────────────────────
+    const [exportOpen, setExportOpen] = useState(false);
+    const [exportDate, setExportDate] = useState(filters.date || today);
+    const [exportText, setExportText] = useState('');
+    const [exportFilename, setExportFilename] = useState('riport.txt');
+    const [exportLoading, setExportLoading] = useState(false);
+    const [copied, setCopied] = useState(false);
+
+    const loadExport = async (date: string) => {
+        setExportLoading(true);
+        setCopied(false);
+        try {
+            const res = await fetch(
+                `/komentar-tim/export?date=${encodeURIComponent(date)}`,
+                { headers: { Accept: 'application/json' } },
+            );
+            const data = await res.json();
+            setExportText(data.text ?? '');
+            setExportFilename(data.filename ?? 'riport.txt');
+        } catch {
+            setExportText('Gagal memuat laporan. Coba lagi.');
+        } finally {
+            setExportLoading(false);
+        }
+    };
+
+    const openExport = () => {
+        const date = filters.date || today;
+        setExportDate(date);
+        setExportOpen(true);
+        loadExport(date);
+    };
+
+    const copyExport = async () => {
+        try {
+            await navigator.clipboard.writeText(exportText);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch {
+            /* clipboard unavailable */
+        }
+    };
+
+    const downloadExport = () => {
+        const blob = new Blob([exportText], {
+            type: 'text/plain;charset=utf-8',
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = exportFilename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    };
 
     const apply = (next: {
         search?: string;
@@ -88,6 +159,15 @@ export default function TeamComments({
                     eyebrow="Distribusi"
                     title="Komentar Tim"
                     description="Semua komentar yang disebar anggota ke berbagai post."
+                    action={
+                        <Button
+                            onClick={openExport}
+                            className={`w-fit ${primaryButtonClass}`}
+                        >
+                            <Download className="h-4 w-4" />
+                            Export Laporan
+                        </Button>
+                    }
                 />
 
                 <div className="glass-card overflow-hidden rounded-2xl">
@@ -315,6 +395,84 @@ export default function TeamComments({
                     </div>
                 </div>
             </div>
+
+            {/* export daily report dialog */}
+            <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+                    <DialogHeader>
+                        <DialogTitle>Export Laporan Komentar</DialogTitle>
+                        <DialogDescription>
+                            Laporan harian komentar per akun media, siap disalin
+                            atau diunduh.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4">
+                        <div className="flex flex-wrap items-end gap-3">
+                            <div className="grid gap-2">
+                                <Label className="text-sm font-medium text-foreground/80">
+                                    Tanggal
+                                </Label>
+                                <DatePicker
+                                    value={exportDate}
+                                    onChange={(v) => {
+                                        setExportDate(v);
+                                        if (v) loadExport(v);
+                                    }}
+                                    className="w-44"
+                                />
+                            </div>
+                            <div className="ml-auto flex items-center gap-2">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={copyExport}
+                                    disabled={exportLoading || !exportText}
+                                    className="gap-1.5"
+                                >
+                                    {copied ? (
+                                        <Check className="h-4 w-4 text-emerald-600" />
+                                    ) : (
+                                        <Copy className="h-4 w-4" />
+                                    )}
+                                    {copied ? 'Tersalin' : 'Salin'}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    onClick={downloadExport}
+                                    disabled={exportLoading || !exportText}
+                                    className="gap-1.5"
+                                >
+                                    <Download className="h-4 w-4" />
+                                    Unduh .txt
+                                </Button>
+                            </div>
+                        </div>
+
+                        <div className="relative">
+                            {exportLoading && (
+                                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-background/60">
+                                    <Spinner />
+                                </div>
+                            )}
+                            <Textarea
+                                readOnly
+                                value={exportText}
+                                rows={16}
+                                className="rounded-xl border-border bg-white/60 font-mono text-xs leading-relaxed whitespace-pre shadow-none focus-visible:border-lux-teal focus-visible:ring-2 focus-visible:ring-lux-teal/20 dark:bg-white/5"
+                            />
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <DialogClose asChild>
+                            <Button type="button" variant="secondary">
+                                Tutup
+                            </Button>
+                        </DialogClose>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </>
     );
 }

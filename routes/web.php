@@ -29,6 +29,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     // Comments — every member logs the comments they distributed to posts.
     Route::get('komentar', [CommentController::class, 'index'])->name('comments.index');
+    Route::get('komentar/export', [CommentController::class, 'export'])->name('comments.export');
     Route::post('komentar', [CommentController::class, 'store'])->name('comments.store');
     Route::patch('komentar/{comment}', [CommentController::class, 'update'])->name('comments.update');
     Route::delete('komentar/{comment}', [CommentController::class, 'destroy'])->name('comments.destroy');
@@ -51,6 +52,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         // Oversight: all members' distributed comments.
         Route::get('komentar-tim', [TeamCommentController::class, 'index'])->name('comments.team');
+        Route::get('komentar-tim/export', [TeamCommentController::class, 'export'])->name('comments.team.export');
 
         // Media management (list/edit/delete) — admin/ketua only. Creating a
         // media is allowed for any member (route registered above).

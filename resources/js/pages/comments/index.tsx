@@ -1,6 +1,9 @@
 import { Head, router, useForm } from '@inertiajs/react';
 import {
     AtSign,
+    Check,
+    Copy,
+    Download,
     ExternalLink,
     Image as ImageIcon,
     Inbox,
@@ -200,6 +203,63 @@ export default function CommentsIndex({
     const remove = (id: number) =>
         router.delete(`/komentar/${id}`, { preserveScroll: true });
 
+    // ── export my daily comment report ────────────────────────────────────
+    const [exportOpen, setExportOpen] = useState(false);
+    const [exportDate, setExportDate] = useState(filters.date || today);
+    const [exportText, setExportText] = useState('');
+    const [exportFilename, setExportFilename] = useState('riport.txt');
+    const [exportLoading, setExportLoading] = useState(false);
+    const [copied, setCopied] = useState(false);
+
+    const loadExport = async (date: string) => {
+        setExportLoading(true);
+        setCopied(false);
+        try {
+            const res = await fetch(
+                `/komentar/export?date=${encodeURIComponent(date)}`,
+                { headers: { Accept: 'application/json' } },
+            );
+            const data = await res.json();
+            setExportText(data.text ?? '');
+            setExportFilename(data.filename ?? 'riport.txt');
+        } catch {
+            setExportText('Gagal memuat laporan. Coba lagi.');
+        } finally {
+            setExportLoading(false);
+        }
+    };
+
+    const openExport = () => {
+        const date = filters.date || today;
+        setExportDate(date);
+        setExportOpen(true);
+        loadExport(date);
+    };
+
+    const copyExport = async () => {
+        try {
+            await navigator.clipboard.writeText(exportText);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch {
+            /* clipboard unavailable */
+        }
+    };
+
+    const downloadExport = () => {
+        const blob = new Blob([exportText], {
+            type: 'text/plain;charset=utf-8',
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = exportFilename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    };
+
     // ── quick-add a media account without leaving the comment modal ────────
     const [mediaModalOpen, setMediaModalOpen] = useState(false);
     const mediaFileRef = useRef<HTMLInputElement>(null);
@@ -280,13 +340,23 @@ export default function CommentsIndex({
                     title="Komentar"
                     description="Catat komentar yang Anda sebar ke berbagai post."
                     action={
-                        <Button
-                            onClick={openCreate}
-                            className={`w-fit ${primaryButtonClass}`}
-                        >
-                            <Plus className="h-4 w-4" />
-                            Tambah Komentar
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                                variant="outline"
+                                onClick={openExport}
+                                className="w-fit gap-2"
+                            >
+                                <Download className="h-4 w-4" />
+                                Export
+                            </Button>
+                            <Button
+                                onClick={openCreate}
+                                className={`w-fit ${primaryButtonClass}`}
+                            >
+                                <Plus className="h-4 w-4" />
+                                Tambah Komentar
+                            </Button>
+                        </div>
                     }
                 />
 
@@ -963,6 +1033,82 @@ export default function CommentsIndex({
                             </Button>
                         </DialogFooter>
                     </form>
+                </DialogContent>
+            </Dialog>
+
+            {/* export daily report dialog */}
+            <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+                    <DialogHeader>
+                        <DialogTitle>Export Laporan Komentar</DialogTitle>
+                        <DialogDescription>
+                            Laporan harian komentar Anda per akun media, siap
+                            disalin atau diunduh.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4">
+                        <div className="flex flex-wrap items-end gap-3">
+                            <div className="grid gap-2">
+                                <Label className={labelClasses}>Tanggal</Label>
+                                <DatePicker
+                                    value={exportDate}
+                                    onChange={(v) => {
+                                        setExportDate(v);
+                                        if (v) loadExport(v);
+                                    }}
+                                    className="w-44"
+                                />
+                            </div>
+                            <div className="ml-auto flex items-center gap-2">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={copyExport}
+                                    disabled={exportLoading || !exportText}
+                                    className="gap-1.5"
+                                >
+                                    {copied ? (
+                                        <Check className="h-4 w-4 text-emerald-600" />
+                                    ) : (
+                                        <Copy className="h-4 w-4" />
+                                    )}
+                                    {copied ? 'Tersalin' : 'Salin'}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    onClick={downloadExport}
+                                    disabled={exportLoading || !exportText}
+                                    className="gap-1.5"
+                                >
+                                    <Download className="h-4 w-4" />
+                                    Unduh .txt
+                                </Button>
+                            </div>
+                        </div>
+
+                        <div className="relative">
+                            {exportLoading && (
+                                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-background/60">
+                                    <Spinner />
+                                </div>
+                            )}
+                            <Textarea
+                                readOnly
+                                value={exportText}
+                                rows={16}
+                                className="rounded-xl border-border bg-white/60 font-mono text-xs leading-relaxed whitespace-pre shadow-none focus-visible:border-lux-teal focus-visible:ring-2 focus-visible:ring-lux-teal/20 dark:bg-white/5"
+                            />
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <DialogClose asChild>
+                            <Button type="button" variant="secondary">
+                                Tutup
+                            </Button>
+                        </DialogClose>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </>
