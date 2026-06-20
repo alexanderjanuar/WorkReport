@@ -37,9 +37,25 @@ type CommentRow = {
     media_logo: string | null;
     platform_label: string;
     quantity: number;
+    replies: number;
+    likes: number;
+    boosters: number;
     post_url: string;
     proof_url: string | null;
     target_range: string | null;
+};
+
+// short summary of the extra (non-comment) actions, e.g. "5 balas · 19 like · 10 booster"
+const extraActions = (row: {
+    replies: number;
+    likes: number;
+    boosters: number;
+}): string => {
+    const parts: string[] = [];
+    if (row.replies > 0) parts.push(`${row.replies} balas`);
+    if (row.likes > 0) parts.push(`${row.likes} like`);
+    if (row.boosters > 0) parts.push(`${row.boosters} booster`);
+    return parts.join(' · ');
 };
 
 type Paginated<T> = {
@@ -248,7 +264,7 @@ export default function TeamComments({
                                         Media
                                     </th>
                                     <th className="px-4 py-3 text-right font-semibold">
-                                        Jumlah
+                                        Aksi
                                     </th>
                                     <th className="px-4 py-3 font-semibold">
                                         Post
@@ -313,8 +329,18 @@ export default function TeamComments({
                                                     </span>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 text-right font-semibold tabular-nums">
-                                                {row.quantity}
+                                            <td className="px-4 py-3 text-right whitespace-nowrap">
+                                                <span className="font-semibold tabular-nums">
+                                                    {row.quantity}
+                                                </span>{' '}
+                                                <span className="text-xs text-muted-foreground">
+                                                    komen
+                                                </span>
+                                                {extraActions(row) ? (
+                                                    <div className="text-[11px] text-muted-foreground">
+                                                        {extraActions(row)}
+                                                    </div>
+                                                ) : null}
                                             </td>
                                             <td className="px-4 py-3">
                                                 <a

@@ -8,7 +8,12 @@ import {
 } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 
-export type SearchableOption = { value: string; label: string };
+export type SearchableOption = {
+    value: string;
+    label: string;
+    /** Optional avatar/logo shown before the label. */
+    logo?: string | null;
+};
 
 type Props = {
     value: string;
@@ -64,11 +69,20 @@ export function SearchableSelect({
                 >
                     <span
                         className={cn(
-                            'truncate',
+                            'flex min-w-0 items-center gap-2 truncate',
                             !selected && 'text-muted-foreground',
                         )}
                     >
-                        {selected ? selected.label : placeholder}
+                        {selected?.logo ? (
+                            <img
+                                src={selected.logo}
+                                alt=""
+                                className="size-5 shrink-0 rounded-full object-cover ring-1 ring-border"
+                            />
+                        ) : null}
+                        <span className="truncate">
+                            {selected ? selected.label : placeholder}
+                        </span>
                     </span>
                     <ChevronDown className="size-4 shrink-0 text-muted-foreground/70" />
                 </button>
@@ -108,7 +122,16 @@ export function SearchableSelect({
                                         'bg-lux-teal/10 font-medium',
                                 )}
                             >
-                                <span className="truncate">{o.label}</span>
+                                <span className="flex min-w-0 items-center gap-2">
+                                    {o.logo ? (
+                                        <img
+                                            src={o.logo}
+                                            alt=""
+                                            className="size-6 shrink-0 rounded-full object-cover ring-1 ring-border"
+                                        />
+                                    ) : null}
+                                    <span className="truncate">{o.label}</span>
+                                </span>
                                 {o.value === value && (
                                     <Check className="size-4 shrink-0 text-lux-teal-dark dark:text-lux-teal" />
                                 )}

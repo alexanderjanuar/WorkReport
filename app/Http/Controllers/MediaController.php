@@ -120,6 +120,9 @@ class MediaController extends Controller
                 'user' => $comment->user?->name,
                 'platform_label' => $comment->platform->label(),
                 'quantity' => $comment->quantity,
+                'replies' => $comment->replies,
+                'likes' => $comment->likes,
+                'boosters' => $comment->boosters,
                 'post_url' => $comment->post_url,
                 'proof_url' => $comment->proof_path
                     ? Storage::disk('public')->url($comment->proof_path)

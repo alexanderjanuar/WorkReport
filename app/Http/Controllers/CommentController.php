@@ -95,12 +95,16 @@ class CommentController extends Controller
         $user = $request->user();
         $date = Carbon::parse($validated['date']);
 
-        $media = Media::orderBy('name')->get(['id', 'name']);
         $comments = $user->comments()
             ->whereDate('commented_on', $date->toDateString())
             ->orderBy('id')
             ->get()
             ->groupBy('media_id');
+
+        // only list media accounts that actually have comments on this date
+        $media = Media::orderBy('name')->get(['id', 'name'])
+            ->filter(fn (Media $account) => $comments->get($account->id)?->isNotEmpty() ?? false)
+            ->values();
 
         $lines = [];
         $lines[] = 'Riport '.$date->day.' '.mb_strtolower($date->translatedFormat('F')).', Jam '.now()->format('H.i');
@@ -108,16 +112,10 @@ class CommentController extends Controller
         $lines[] = '';
 
         $renderItems = function ($items) use (&$lines, $user) {
-            if ($items === null || $items->isEmpty()) {
-                $lines[] = '1.';
-                $lines[] = '';
-
-                return;
-            }
             $n = 1;
             foreach ($items as $comment) {
                 $lines[] = $n.'. '.$comment->quantity.' komen';
-                $lines[] = $comment->post_url.' ✅ [ '.$user->name.' ]';
+                $lines[] = $comment->post_url.' ✅ '.$comment->actionSummary().' [ '.$user->name.' ]';
                 $lines[] = '';
                 $n++;
             }
@@ -152,6 +150,10 @@ class CommentController extends Controller
             'commented_on' => ['required', 'date'],
             'platform' => ['required', Rule::enum(Platform::class)],
             'quantity' => ['required', 'integer', 'min:1', 'max:1000000'],
+            // extra actions on the same post (do NOT affect the target quota)
+            'replies' => ['nullable', 'integer', 'min:0', 'max:1000000'],
+            'likes' => ['nullable', 'integer', 'min:0', 'max:1000000'],
+            'boosters' => ['nullable', 'integer', 'min:0', 'max:1000000'],
             'post_url' => ['required', 'url', 'max:2048'],
             'proof' => ['nullable', 'image', 'max:4096'], // ≤ 4 MB screenshot
             'media_id' => ['nullable', Rule::exists('media', 'id')],
@@ -165,6 +167,9 @@ class CommentController extends Controller
             'commented_on' => $validated['commented_on'],
             'platform' => $validated['platform'],
             'quantity' => $validated['quantity'],
+            'replies' => $validated['replies'] ?? 0,
+            'likes' => $validated['likes'] ?? 0,
+            'boosters' => $validated['boosters'] ?? 0,
             'post_url' => $validated['post_url'],
             'media_id' => ($validated['media_id'] ?? null) ?: null,
             'target_id' => ($validated['target_id'] ?? null) ?: null,
@@ -183,17 +188,20 @@ class CommentController extends Controller
     /**
      * Media accounts for the comment form's select.
      *
-     * @return array<int, array{value: int, label: string, platform: string}>
+     * @return array<int, array{value: int, label: string, platform: string, logo_url: string|null}>
      */
     private function mediaOptions(): array
     {
         return Media::orderBy('platform')
             ->orderBy('name')
-            ->get(['id', 'name', 'platform'])
+            ->get(['id', 'name', 'platform', 'logo_path'])
             ->map(fn (Media $media) => [
                 'value' => $media->id,
                 'label' => $media->name,
                 'platform' => $media->platform->value,
+                'logo_url' => $media->logo_path
+                    ? Storage::disk('public')->url($media->logo_path)
+                    : null,
             ])
             ->all();
     }
@@ -228,6 +236,9 @@ class CommentController extends Controller
             'platform' => $comment->platform->value,
             'platform_label' => $comment->platform->label(),
             'quantity' => $comment->quantity,
+            'replies' => $comment->replies,
+            'likes' => $comment->likes,
+            'boosters' => $comment->boosters,
             'post_url' => $comment->post_url,
             // displayable proof: uploaded screenshot first, legacy URL otherwise
             'proof_url' => $comment->proof_path

@@ -49,6 +49,9 @@ class TeamCommentController extends Controller
                     : null,
                 'platform_label' => $comment->platform->label(),
                 'quantity' => $comment->quantity,
+                'replies' => $comment->replies,
+                'likes' => $comment->likes,
+                'boosters' => $comment->boosters,
                 'post_url' => $comment->post_url,
                 'proof_url' => $comment->proof_path
                     ? Storage::disk('public')->url($comment->proof_path)
@@ -83,7 +86,6 @@ class TeamCommentController extends Controller
 
         $date = Carbon::parse($validated['date']);
 
-        $media = Media::orderBy('name')->get(['id', 'name']);
         $comments = Comment::query()
             ->with('user:id,name')
             ->whereDate('commented_on', $date->toDateString())
@@ -91,22 +93,21 @@ class TeamCommentController extends Controller
             ->get()
             ->groupBy('media_id');
 
+        // only list media accounts that actually have comments on this date
+        $media = Media::orderBy('name')->get(['id', 'name'])
+            ->filter(fn (Media $account) => $comments->get($account->id)?->isNotEmpty() ?? false)
+            ->values();
+
         $lines = [];
         $lines[] = 'Riport '.$date->day.' '.mb_strtolower($date->translatedFormat('F')).', Jam '.now()->format('H.i');
         $lines[] = 'Cek '.$media->count().' akun media ;';
         $lines[] = '';
 
         $renderItems = function ($items) use (&$lines) {
-            if ($items === null || $items->isEmpty()) {
-                $lines[] = '1.';
-                $lines[] = '';
-
-                return;
-            }
             $n = 1;
             foreach ($items as $comment) {
                 $lines[] = $n.'. '.$comment->quantity.' komen';
-                $lines[] = $comment->post_url.' ✅ [ '.($comment->user?->name ?? '-').' ]';
+                $lines[] = $comment->post_url.' ✅ '.$comment->actionSummary().' [ '.($comment->user?->name ?? '-').' ]';
                 $lines[] = '';
                 $n++;
             }

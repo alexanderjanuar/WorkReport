@@ -46,7 +46,12 @@ import { dashboard } from '@/routes';
 
 type Option = { value: string; label: string };
 type TargetOption = { value: number; label: string };
-type MediaOption = { value: number; label: string; platform: string };
+type MediaOption = {
+    value: number;
+    label: string;
+    platform: string;
+    logo_url: string | null;
+};
 
 type CommentRow = {
     id: number;
@@ -55,6 +60,9 @@ type CommentRow = {
     platform: string;
     platform_label: string;
     quantity: number;
+    replies: number;
+    likes: number;
+    boosters: number;
     post_url: string;
     proof_url: string | null;
     has_proof: boolean;
@@ -90,10 +98,34 @@ const selectClasses =
 const iconClasses =
     'pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground/70';
 
+// the four action counts recorded per post (only komen affects the target)
+const ACTION_FIELDS = [
+    { key: 'quantity', label: 'Komen', min: 1 },
+    { key: 'replies', label: 'Balasan', min: 0 },
+    { key: 'likes', label: 'Like', min: 0 },
+    { key: 'boosters', label: 'Booster', min: 0 },
+] as const;
+
+// short summary of the extra (non-comment) actions, e.g. "5 balas · 19 like · 10 booster"
+const extraActions = (row: {
+    replies: number;
+    likes: number;
+    boosters: number;
+}): string => {
+    const parts: string[] = [];
+    if (row.replies > 0) parts.push(`${row.replies} balas`);
+    if (row.likes > 0) parts.push(`${row.likes} like`);
+    if (row.boosters > 0) parts.push(`${row.boosters} booster`);
+    return parts.join(' · ');
+};
+
 type FormData = {
     commented_on: string;
     platform: string;
     quantity: number | '';
+    replies: number | '';
+    likes: number | '';
+    boosters: number | '';
     post_url: string;
     proof: File | null;
     media_id: number | '';
@@ -117,6 +149,9 @@ export default function CommentsIndex({
         commented_on: today,
         platform: platformOptions[0]?.value ?? '',
         quantity: 1,
+        replies: 0,
+        likes: 0,
+        boosters: 0,
         post_url: '',
         proof: null,
         media_id: '',
@@ -155,6 +190,9 @@ export default function CommentsIndex({
             commented_on: today,
             platform: platformOptions[0]?.value ?? '',
             quantity: 1,
+            replies: 0,
+            likes: 0,
+            boosters: 0,
             post_url: '',
             proof: null,
             media_id: '',
@@ -172,6 +210,9 @@ export default function CommentsIndex({
             commented_on: row.date,
             platform: row.platform,
             quantity: row.quantity,
+            replies: row.replies,
+            likes: row.likes,
+            boosters: row.boosters,
             post_url: row.post_url,
             proof: null,
             media_id: row.media_id ?? '',
@@ -487,7 +528,7 @@ export default function CommentsIndex({
                                         Media
                                     </th>
                                     <th className="px-4 py-3 text-right font-semibold">
-                                        Jumlah
+                                        Aksi
                                     </th>
                                     <th className="px-4 py-3 font-semibold">
                                         Post
@@ -558,8 +599,18 @@ export default function CommentsIndex({
                                                     </span>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 text-right font-semibold tabular-nums">
-                                                {row.quantity}
+                                            <td className="px-4 py-3 text-right whitespace-nowrap">
+                                                <span className="font-semibold tabular-nums">
+                                                    {row.quantity}
+                                                </span>{' '}
+                                                <span className="text-xs text-muted-foreground">
+                                                    komen
+                                                </span>
+                                                {extraActions(row) ? (
+                                                    <div className="text-[11px] text-muted-foreground">
+                                                        {extraActions(row)}
+                                                    </div>
+                                                ) : null}
                                             </td>
                                             <td className="px-4 py-3">
                                                 <a
@@ -726,72 +777,77 @@ export default function CommentsIndex({
                             </div>
                         </div>
 
-                        {/* jumlah + target */}
-                        <div className="grid grid-cols-2 gap-3">
-                            <div className="grid gap-2">
-                                <Label
-                                    htmlFor="c-qty"
-                                    className={labelClasses}
-                                >
-                                    Jumlah komentar
-                                </Label>
-                                <Input
-                                    id="c-qty"
-                                    type="number"
-                                    min={1}
-                                    value={form.data.quantity}
-                                    onChange={(e) =>
-                                        form.setData(
-                                            'quantity',
-                                            e.target.value === ''
-                                                ? ''
-                                                : Number(e.target.value),
-                                        )
-                                    }
-                                    placeholder="mis. 10"
-                                    className={fieldClasses}
-                                />
-                                <InputError message={err('quantity')} />
+                        {/* action counts (komen + balasan + like + booster) */}
+                        <div className="grid gap-2">
+                            <Label className={labelClasses}>
+                                Jumlah aksi di post ini
+                            </Label>
+                            <div className="grid grid-cols-4 gap-2 rounded-xl border border-border bg-white/40 p-3 dark:bg-white/[0.03]">
+                                {ACTION_FIELDS.map((f) => (
+                                    <div key={f.key} className="grid gap-1.5">
+                                        <Label className="text-center text-[11px] font-medium text-muted-foreground">
+                                            {f.label}
+                                        </Label>
+                                        <Input
+                                            type="number"
+                                            min={f.min}
+                                            inputMode="numeric"
+                                            value={form.data[f.key]}
+                                            onChange={(e) =>
+                                                form.setData(
+                                                    f.key,
+                                                    e.target.value === ''
+                                                        ? ''
+                                                        : Number(e.target.value),
+                                                )
+                                            }
+                                            className="h-10 rounded-lg border-border bg-white/70 px-1 text-center text-sm shadow-none focus-visible:border-lux-teal focus-visible:ring-2 focus-visible:ring-lux-teal/20 dark:bg-white/5"
+                                        />
+                                    </div>
+                                ))}
                             </div>
-                            <div className="grid gap-2">
-                                <Label className={labelClasses}>
-                                    Target{' '}
-                                    <span className="font-normal text-muted-foreground">
-                                        (opsional)
-                                    </span>
-                                </Label>
-                                <Select
-                                    value={
-                                        form.data.target_id === ''
-                                            ? 'none'
-                                            : String(form.data.target_id)
-                                    }
-                                    onValueChange={(v) =>
-                                        form.setData(
-                                            'target_id',
-                                            v === 'none' ? '' : Number(v),
-                                        )
-                                    }
-                                >
-                                    <SelectTrigger className={selectClasses}>
-                                        <SelectValue placeholder="Tanpa target" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="none">
-                                            Tanpa target
+                            <InputError message={err('quantity')} />
+                        </div>
+
+                        {/* target */}
+                        <div className="grid gap-2">
+                            <Label className={labelClasses}>
+                                Target{' '}
+                                <span className="font-normal text-muted-foreground">
+                                    (opsional)
+                                </span>
+                            </Label>
+                            <Select
+                                value={
+                                    form.data.target_id === ''
+                                        ? 'none'
+                                        : String(form.data.target_id)
+                                }
+                                onValueChange={(v) =>
+                                    form.setData(
+                                        'target_id',
+                                        v === 'none' ? '' : Number(v),
+                                    )
+                                }
+                            >
+                                <SelectTrigger className={selectClasses}>
+                                    <SelectValue placeholder="Tanpa target" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="none">
+                                        Tanpa target
+                                    </SelectItem>
+                                    {targetOptions.map((o) => (
+                                        <SelectItem
+                                            key={o.value}
+                                            value={String(o.value)}
+                                        >
+                                            {o.label}
                                         </SelectItem>
-                                        {targetOptions.map((o) => (
-                                            <SelectItem
-                                                key={o.value}
-                                                value={String(o.value)}
-                                            >
-                                                {o.label}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <InputError message={err('target_id')} />
-                            </div>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <InputError message={err('target_id')} />
                         </div>
 
                         {/* media (akun) + quick add */}
@@ -819,6 +875,7 @@ export default function CommentsIndex({
                                             ...mediaOptions.map((o) => ({
                                                 value: String(o.value),
                                                 label: o.label,
+                                                logo: o.logo_url,
                                             })),
                                         ]}
                                         placeholder="Pilih media"
