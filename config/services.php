@@ -35,4 +35,9 @@ return [
         ],
     ],
 
+    'apify' => [
+        'token' => env('APIFY_TOKEN'),
+        'instagram_actor' => env('APIFY_INSTAGRAM_ACTOR', 'dSCLg0C3YEZ83HzYX'),
+    ],
+
 ];

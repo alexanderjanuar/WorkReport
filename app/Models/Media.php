@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'platform', 'logo_path', 'url', 'note'])]
+#[Fillable(['name', 'platform', 'followers', 'logo_path', 'url', 'note'])]
 class Media extends Model
 {
     protected $table = 'media';
@@ -19,6 +19,7 @@ class Media extends Model
     {
         return [
             'platform' => Platform::class,
+            'followers' => 'integer',
         ];
     }
 

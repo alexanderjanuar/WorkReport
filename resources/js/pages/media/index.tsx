@@ -1,15 +1,19 @@
-import { Head, router, useForm } from '@inertiajs/react';
+import { Head, Link, router, useForm } from '@inertiajs/react';
 import {
     AtSign,
     ExternalLink,
+    Eye,
     Image as ImageIcon,
     Inbox,
+    Instagram,
     Link2,
     Pencil,
     Plus,
     Search,
+    Sparkles,
     Trash2,
     Upload,
+    Users,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import InputError from '@/components/input-error';
@@ -35,6 +39,7 @@ import {
 } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
+import { csrfToken } from '@/lib/utils';
 import { dashboard } from '@/routes';
 
 type Option = { value: string; label: string };
@@ -44,10 +49,18 @@ type MediaRow = {
     name: string;
     platform: string;
     platform_label: string;
+    followers: number | null;
     logo_url: string | null;
     url: string | null;
     note: string | null;
     comments_count: number;
+};
+
+const formatFollowers = (n: number | null): string => {
+    if (n == null) return '—';
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace('.', ',') + ' jt';
+    if (n >= 1_000) return (n / 1_000).toFixed(1).replace('.', ',') + ' rb';
+    return String(n);
 };
 
 type Props = {
@@ -67,9 +80,11 @@ const iconClasses =
 type FormData = {
     name: string;
     platform: string;
+    followers: number | '';
     url: string;
     note: string;
     logo: File | null;
+    logo_path: string;
 };
 
 export default function MediaIndex({ media, platformOptions, filters }: Props) {
@@ -80,18 +95,65 @@ export default function MediaIndex({ media, platformOptions, filters }: Props) {
     const fileRef = useRef<HTMLInputElement>(null);
     const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+    // ── scrape an Instagram profile (Apify) to prefill the form ────────────
+    const [scrapeUser, setScrapeUser] = useState('');
+    const [scraping, setScraping] = useState(false);
+    const [scrapeError, setScrapeError] = useState<string | null>(null);
+
     const form = useForm<FormData>({
         name: '',
         platform: platformOptions[0]?.value ?? '',
+        followers: '',
         url: '',
         note: '',
         logo: null,
+        logo_path: '',
     });
     const err = (key: string) => (form.errors as Record<string, string>)[key];
 
     const onPickLogo = (file: File | null) => {
-        form.setData('logo', file);
+        // a manually-chosen file overrides any scraped/staged logo
+        form.setData({ ...form.data, logo: file, logo_path: '' });
         setPreview(file ? URL.createObjectURL(file) : (editing?.logo_url ?? null));
+    };
+
+    const doScrape = async () => {
+        const username = scrapeUser.trim().replace(/^@/, '');
+        if (!username) return;
+        setScraping(true);
+        setScrapeError(null);
+        try {
+            const res = await fetch('/media/scrape', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': csrfToken(),
+                },
+                body: JSON.stringify({ username }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                setScrapeError(data.message ?? 'Gagal mengambil profil.');
+                return;
+            }
+            form.clearErrors();
+            form.setData({
+                ...form.data,
+                name: data.name ?? form.data.name,
+                url: data.url ?? '',
+                platform: data.platform ?? form.data.platform,
+                followers: data.followers ?? '',
+                logo: null,
+                logo_path: data.logo_path ?? '',
+            });
+            if (fileRef.current) fileRef.current.value = '';
+            setPreview(data.logo_url ?? null);
+        } catch {
+            setScrapeError('Gagal menghubungi server.');
+        } finally {
+            setScraping(false);
+        }
     };
 
     const onSearch = (value: string) => {
@@ -113,12 +175,16 @@ export default function MediaIndex({ media, platformOptions, filters }: Props) {
         form.setData({
             name: '',
             platform: platformOptions[0]?.value ?? '',
+            followers: '',
             url: '',
             note: '',
             logo: null,
+            logo_path: '',
         });
         setEditing(null);
         setPreview(null);
+        setScrapeUser('');
+        setScrapeError(null);
         if (fileRef.current) fileRef.current.value = '';
         setOpen(true);
     };
@@ -128,12 +194,16 @@ export default function MediaIndex({ media, platformOptions, filters }: Props) {
         form.setData({
             name: row.name,
             platform: row.platform,
+            followers: row.followers ?? '',
             url: row.url ?? '',
             note: row.note ?? '',
             logo: null,
+            logo_path: '',
         });
         setEditing(row);
         setPreview(row.logo_url);
+        setScrapeUser('');
+        setScrapeError(null);
         if (fileRef.current) fileRef.current.value = '';
         setOpen(true);
     };
@@ -219,6 +289,9 @@ export default function MediaIndex({ media, platformOptions, filters }: Props) {
                                     <th className="px-4 py-3 font-semibold">
                                         Platform
                                     </th>
+                                    <th className="px-4 py-3 text-right font-semibold">
+                                        Follower
+                                    </th>
                                     <th className="hidden px-4 py-3 font-semibold lg:table-cell">
                                         Catatan
                                     </th>
@@ -233,7 +306,7 @@ export default function MediaIndex({ media, platformOptions, filters }: Props) {
                             <tbody>
                                 {media.length === 0 ? (
                                     <tr>
-                                        <td colSpan={5} className="px-4 py-16">
+                                        <td colSpan={6} className="px-4 py-16">
                                             <div className="flex flex-col items-center gap-3 text-center">
                                                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted">
                                                     <Inbox className="h-6 w-6 text-muted-foreground" />
@@ -270,25 +343,30 @@ export default function MediaIndex({ media, platformOptions, filters }: Props) {
                                                             <AtSign className="h-4 w-4" />
                                                         </span>
                                                     )}
+                                                    <Link
+                                                        href={`/media/${row.id}`}
+                                                        className="font-medium hover:text-lux-teal-dark hover:underline dark:hover:text-lux-teal"
+                                                    >
+                                                        {row.name}
+                                                    </Link>
                                                     {row.url ? (
                                                         <a
                                                             href={row.url}
                                                             target="_blank"
                                                             rel="noopener noreferrer"
-                                                            className="inline-flex items-center gap-1 font-medium hover:text-lux-teal-dark hover:underline dark:hover:text-lux-teal"
+                                                            title="Buka di platform"
+                                                            className="text-muted-foreground transition-colors hover:text-lux-teal-dark dark:hover:text-lux-teal"
                                                         >
-                                                            {row.name}
-                                                            <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                                                            <ExternalLink className="h-3.5 w-3.5" />
                                                         </a>
-                                                    ) : (
-                                                        <span className="font-medium">
-                                                            {row.name}
-                                                        </span>
-                                                    )}
+                                                    ) : null}
                                                 </div>
                                             </td>
                                             <td className="px-4 py-3">
                                                 {row.platform_label}
+                                            </td>
+                                            <td className="px-4 py-3 text-right font-medium tabular-nums">
+                                                {formatFollowers(row.followers)}
                                             </td>
                                             <td className="hidden max-w-xs truncate px-4 py-3 text-muted-foreground lg:table-cell">
                                                 {row.note || '—'}
@@ -298,6 +376,13 @@ export default function MediaIndex({ media, platformOptions, filters }: Props) {
                                             </td>
                                             <td className="px-4 py-3">
                                                 <div className="flex items-center justify-end gap-1">
+                                                    <Link
+                                                        href={`/media/${row.id}`}
+                                                        className="text-muted-foreground transition-colors hover:text-lux-teal-dark dark:hover:text-lux-teal"
+                                                        title="Lihat detail"
+                                                    >
+                                                        <Eye className="h-4 w-4" />
+                                                    </Link>
                                                     <button
                                                         type="button"
                                                         onClick={() =>
@@ -348,6 +433,57 @@ export default function MediaIndex({ media, platformOptions, filters }: Props) {
                         </DialogDescription>
                     </DialogHeader>
                     <form onSubmit={submit} className="space-y-5">
+                        {/* scrape from Instagram (Apify) */}
+                        <div className="rounded-xl border border-lux-teal/20 bg-lux-teal/[0.05] p-3">
+                            <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-lux-teal-dark dark:text-lux-teal">
+                                <Sparkles className="h-3.5 w-3.5" />
+                                Isi otomatis dari Instagram
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="relative flex-1">
+                                    <Instagram className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground/70" />
+                                    <Input
+                                        value={scrapeUser}
+                                        onChange={(e) =>
+                                            setScrapeUser(e.target.value)
+                                        }
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                doScrape();
+                                            }
+                                        }}
+                                        placeholder="username IG (mis. humansofny)"
+                                        className={`${fieldClasses} pr-3 pl-10`}
+                                    />
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={doScrape}
+                                    disabled={scraping || !scrapeUser.trim()}
+                                    className="shrink-0 gap-1.5 rounded-xl"
+                                >
+                                    {scraping ? (
+                                        <Spinner />
+                                    ) : (
+                                        <Sparkles className="h-4 w-4" />
+                                    )}
+                                    Ambil profil
+                                </Button>
+                            </div>
+                            {scrapeError ? (
+                                <p className="mt-2 text-xs text-destructive">
+                                    {scrapeError}
+                                </p>
+                            ) : (
+                                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                                    Mengisi nama, link, & logo dari profil IG
+                                    secara otomatis.
+                                </p>
+                            )}
+                        </div>
+
                         {/* logo */}
                         <div className="grid gap-2">
                             <Label className={labelClasses}>
@@ -459,6 +595,36 @@ export default function MediaIndex({ media, platformOptions, filters }: Props) {
                                 </Select>
                                 <InputError message={err('platform')} />
                             </div>
+                        </div>
+
+                        <div className="grid gap-2">
+                            <Label htmlFor="m-followers" className={labelClasses}>
+                                Jumlah follower{' '}
+                                <span className="font-normal text-muted-foreground">
+                                    (opsional)
+                                </span>
+                            </Label>
+                            <div className="relative">
+                                <Users className={iconClasses} />
+                                <Input
+                                    id="m-followers"
+                                    type="number"
+                                    min={0}
+                                    inputMode="numeric"
+                                    value={form.data.followers}
+                                    onChange={(e) =>
+                                        form.setData(
+                                            'followers',
+                                            e.target.value === ''
+                                                ? ''
+                                                : Number(e.target.value),
+                                        )
+                                    }
+                                    placeholder="mis. 12500"
+                                    className={`${fieldClasses} pr-3 pl-10`}
+                                />
+                            </div>
+                            <InputError message={err('followers')} />
                         </div>
 
                         <div className="grid gap-2">

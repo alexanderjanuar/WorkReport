@@ -7,9 +7,11 @@ import {
     ExternalLink,
     Image as ImageIcon,
     Inbox,
+    Instagram,
     Link2,
     Pencil,
     Plus,
+    Sparkles,
     Trash2,
     Upload,
 } from 'lucide-react';
@@ -36,8 +38,10 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
+import { csrfToken } from '@/lib/utils';
 import { dashboard } from '@/routes';
 
 type Option = { value: string; label: string };
@@ -262,6 +266,7 @@ export default function CommentsIndex({
 
     // ── quick-add a media account without leaving the comment modal ────────
     const [mediaModalOpen, setMediaModalOpen] = useState(false);
+    const [mediaPreview, setMediaPreview] = useState<string | null>(null);
     const mediaFileRef = useRef<HTMLInputElement>(null);
     const mediaForm = useForm<{
         name: string;
@@ -269,15 +274,26 @@ export default function CommentsIndex({
         url: string;
         note: string;
         logo: File | null;
+        logo_path: string;
+        followers: number | '';
     }>({
         name: '',
         platform: platformOptions[0]?.value ?? '',
         url: '',
         note: '',
         logo: null,
+        logo_path: '',
+        followers: '',
     });
     const mediaErr = (key: string) =>
         (mediaForm.errors as Record<string, string>)[key];
+
+    // scrape an Instagram profile (Apify) to prefill the quick-add media form
+    const [mediaScrapeUser, setMediaScrapeUser] = useState('');
+    const [mediaScraping, setMediaScraping] = useState(false);
+    const [mediaScrapeError, setMediaScrapeError] = useState<string | null>(
+        null,
+    );
 
     const openMediaModal = () => {
         mediaForm.clearErrors();
@@ -288,9 +304,53 @@ export default function CommentsIndex({
             url: '',
             note: '',
             logo: null,
+            logo_path: '',
+            followers: '',
         });
+        setMediaPreview(null);
+        setMediaScrapeUser('');
+        setMediaScrapeError(null);
         if (mediaFileRef.current) mediaFileRef.current.value = '';
         setMediaModalOpen(true);
+    };
+
+    const doMediaScrape = async () => {
+        const username = mediaScrapeUser.trim().replace(/^@/, '');
+        if (!username) return;
+        setMediaScraping(true);
+        setMediaScrapeError(null);
+        try {
+            const res = await fetch('/media/scrape', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': csrfToken(),
+                },
+                body: JSON.stringify({ username }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                setMediaScrapeError(data.message ?? 'Gagal mengambil profil.');
+                return;
+            }
+            mediaForm.clearErrors();
+            mediaForm.setData({
+                ...mediaForm.data,
+                name: data.name ?? mediaForm.data.name,
+                url: data.url ?? '',
+                platform: data.platform ?? mediaForm.data.platform,
+                followers: data.followers ?? '',
+                logo: null,
+                logo_path: data.logo_path ?? '',
+            });
+            if (mediaFileRef.current) mediaFileRef.current.value = '';
+            setMediaPreview(data.logo_url ?? null);
+        } catch {
+            setMediaScrapeError('Gagal menghubungi server.');
+        } finally {
+            setMediaScraping(false);
+        }
     };
 
     const submitMedia = (e: React.FormEvent) => {
@@ -298,10 +358,12 @@ export default function CommentsIndex({
         const prevIds = new Set(mediaOptions.map((o) => o.value));
         mediaForm.post('/media', {
             preserveScroll: true,
+            preserveState: true, // keep the comment modal open underneath
             forceFormData: true,
             onSuccess: (page) => {
                 setMediaModalOpen(false);
                 mediaForm.reset();
+                setMediaPreview(null);
                 // auto-select the freshly created media in the comment form
                 const next = (page.props as { mediaOptions?: MediaOption[] })
                     .mediaOptions;
@@ -742,31 +804,27 @@ export default function CommentsIndex({
                             </Label>
                             <div className="flex items-center gap-2">
                                 <div className="flex-1">
-                                    <Select
+                                    <SearchableSelect
                                         value={
                                             form.data.media_id === ''
                                                 ? 'none'
                                                 : String(form.data.media_id)
                                         }
-                                        onValueChange={onSelectMedia}
-                                    >
-                                        <SelectTrigger className={selectClasses}>
-                                            <SelectValue placeholder="Pilih media" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="none">
-                                                Tanpa media
-                                            </SelectItem>
-                                            {mediaOptions.map((o) => (
-                                                <SelectItem
-                                                    key={o.value}
-                                                    value={String(o.value)}
-                                                >
-                                                    {o.label}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                                        onChange={onSelectMedia}
+                                        options={[
+                                            {
+                                                value: 'none',
+                                                label: 'Tanpa media',
+                                            },
+                                            ...mediaOptions.map((o) => ({
+                                                value: String(o.value),
+                                                label: o.label,
+                                            })),
+                                        ]}
+                                        placeholder="Pilih media"
+                                        searchPlaceholder="Cari media…"
+                                        emptyText="Media tidak ditemukan."
+                                    />
                                 </div>
                                 <Button
                                     type="button"
@@ -891,6 +949,58 @@ export default function CommentsIndex({
                         </DialogDescription>
                     </DialogHeader>
                     <form onSubmit={submitMedia} className="space-y-5">
+                        {/* scrape from Instagram (Apify) */}
+                        <div className="rounded-xl border border-lux-teal/20 bg-lux-teal/[0.05] p-3">
+                            <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-lux-teal-dark dark:text-lux-teal">
+                                <Sparkles className="h-3.5 w-3.5" />
+                                Isi otomatis dari Instagram
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="relative flex-1">
+                                    <Instagram className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground/70" />
+                                    <Input
+                                        value={mediaScrapeUser}
+                                        onChange={(e) =>
+                                            setMediaScrapeUser(e.target.value)
+                                        }
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                doMediaScrape();
+                                            }
+                                        }}
+                                        placeholder="username IG"
+                                        className={`${fieldClasses} pr-3 pl-10`}
+                                    />
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={doMediaScrape}
+                                    disabled={
+                                        mediaScraping || !mediaScrapeUser.trim()
+                                    }
+                                    className="shrink-0 gap-1.5 rounded-xl"
+                                >
+                                    {mediaScraping ? (
+                                        <Spinner />
+                                    ) : (
+                                        <Sparkles className="h-4 w-4" />
+                                    )}
+                                    Ambil
+                                </Button>
+                            </div>
+                            {mediaScrapeError ? (
+                                <p className="mt-2 text-xs text-destructive">
+                                    {mediaScrapeError}
+                                </p>
+                            ) : (
+                                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                                    Mengisi nama, link, follower, & logo otomatis.
+                                </p>
+                            )}
+                        </div>
+
                         <div className="grid grid-cols-2 gap-3">
                             <div className="grid gap-2">
                                 <Label
@@ -986,18 +1096,32 @@ export default function CommentsIndex({
                                     (opsional)
                                 </span>
                             </Label>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-3">
+                                {mediaPreview ? (
+                                    <img
+                                        src={mediaPreview}
+                                        alt="Pratinjau logo"
+                                        className="h-11 w-11 shrink-0 rounded-xl object-cover ring-1 ring-border"
+                                    />
+                                ) : null}
                                 <input
                                     ref={mediaFileRef}
                                     type="file"
                                     accept="image/*"
                                     className="hidden"
-                                    onChange={(e) =>
-                                        mediaForm.setData(
-                                            'logo',
-                                            e.target.files?.[0] ?? null,
-                                        )
-                                    }
+                                    onChange={(e) => {
+                                        const file = e.target.files?.[0] ?? null;
+                                        mediaForm.setData({
+                                            ...mediaForm.data,
+                                            logo: file,
+                                            logo_path: '',
+                                        });
+                                        setMediaPreview(
+                                            file
+                                                ? URL.createObjectURL(file)
+                                                : null,
+                                        );
+                                    }}
                                 />
                                 <Button
                                     type="button"
@@ -1007,7 +1131,7 @@ export default function CommentsIndex({
                                     onClick={() => mediaFileRef.current?.click()}
                                 >
                                     <Upload className="h-3.5 w-3.5" />
-                                    Pilih logo
+                                    {mediaPreview ? 'Ganti logo' : 'Pilih logo'}
                                 </Button>
                                 {mediaForm.data.logo && (
                                     <span className="truncate text-xs text-muted-foreground">

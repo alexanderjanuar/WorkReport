@@ -37,6 +37,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Any member can quick-add a media account (e.g. from the comment modal);
     // full media management stays admin/ketua only (below).
     Route::post('media', [MediaController::class, 'store'])->name('media.store');
+    Route::post('media/scrape', [MediaController::class, 'scrape'])->name('media.scrape');
 
     // Target & user management — admin and ketua tim only.
     Route::middleware('role:admin,ketua_tim')->group(function () {
@@ -54,9 +55,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('komentar-tim', [TeamCommentController::class, 'index'])->name('comments.team');
         Route::get('komentar-tim/export', [TeamCommentController::class, 'export'])->name('comments.team.export');
 
-        // Media management (list/edit/delete) — admin/ketua only. Creating a
-        // media is allowed for any member (route registered above).
+        // Media management (list/detail/edit/delete) — admin/ketua only. Creating
+        // a media is allowed for any member (route registered above).
         Route::get('media', [MediaController::class, 'index'])->name('media.index');
+        Route::get('media/{media}', [MediaController::class, 'show'])->name('media.show');
+        Route::post('media/{media}/resync', [MediaController::class, 'resync'])->name('media.resync');
         Route::patch('media/{media}', [MediaController::class, 'update'])->name('media.update');
         Route::delete('media/{media}', [MediaController::class, 'destroy'])->name('media.destroy');
 
