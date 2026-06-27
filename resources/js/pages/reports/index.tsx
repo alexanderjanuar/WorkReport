@@ -1,8 +1,11 @@
 import { Head, router, useForm } from '@inertiajs/react';
 import {
     CalendarDays,
+    Check,
     CheckCircle2,
     Circle,
+    Copy,
+    Download,
     ExternalLink,
     Inbox,
     Link2,
@@ -102,20 +105,41 @@ type FormData = {
     items: FormItem[];
 };
 
-/** Group a target's progress entries by date (one header per day, one note). */
+type PlatformGroup = {
+    platform: string;
+    platform_label: string;
+    total: number;
+    entries: ProgressEntry[];
+};
+
+/**
+ * Group a target's progress entries by date, then by platform within each
+ * date (so repeated work on the same platform sits together, with its total).
+ */
 function groupReports(reports: ProgressEntry[]) {
     const groups: {
         date: string;
         note: string | null;
-        entries: ProgressEntry[];
+        platforms: PlatformGroup[];
     }[] = [];
     for (const r of reports) {
         let group = groups.find((g) => g.date === r.reported_on);
         if (!group) {
-            group = { date: r.reported_on, note: null, entries: [] };
+            group = { date: r.reported_on, note: null, platforms: [] };
             groups.push(group);
         }
-        group.entries.push(r);
+        let pg = group.platforms.find((p) => p.platform === r.platform);
+        if (!pg) {
+            pg = {
+                platform: r.platform,
+                platform_label: r.platform_label,
+                total: 0,
+                entries: [],
+            };
+            group.platforms.push(pg);
+        }
+        pg.entries.push(r);
+        pg.total += r.quantity;
         if (!group.note && r.note) group.note = r.note;
     }
     return groups;
@@ -131,6 +155,62 @@ const iconClasses =
 
 export default function ReportsIndex({ targets, platformOptions, today }: Props) {
     const [logging, setLogging] = useState<TargetCard | null>(null);
+
+    // ── export my daily progress report ───────────────────────────────────
+    const [exportOpen, setExportOpen] = useState(false);
+    const [exportDate, setExportDate] = useState(today);
+    const [exportText, setExportText] = useState('');
+    const [exportFilename, setExportFilename] = useState('progres.txt');
+    const [exportLoading, setExportLoading] = useState(false);
+    const [copied, setCopied] = useState(false);
+
+    const loadExport = async (date: string) => {
+        setExportLoading(true);
+        setCopied(false);
+        try {
+            const res = await fetch(
+                `/reports/export?date=${encodeURIComponent(date)}`,
+                { headers: { Accept: 'application/json' } },
+            );
+            const data = await res.json();
+            setExportText(data.text ?? '');
+            setExportFilename(data.filename ?? 'progres.txt');
+        } catch {
+            setExportText('Gagal memuat laporan. Coba lagi.');
+        } finally {
+            setExportLoading(false);
+        }
+    };
+
+    const openExport = () => {
+        setExportDate(today);
+        setExportOpen(true);
+        loadExport(today);
+    };
+
+    const copyExport = async () => {
+        try {
+            await navigator.clipboard.writeText(exportText);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch {
+            /* clipboard unavailable */
+        }
+    };
+
+    const downloadExport = () => {
+        const blob = new Blob([exportText], {
+            type: 'text/plain;charset=utf-8',
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = exportFilename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    };
 
     const newItem = (): FormItem => ({
         target_item_id: '',
@@ -276,6 +356,16 @@ export default function ReportsIndex({ targets, platformOptions, today }: Props)
                     eyebrow="Progres Saya"
                     title="Target Saya"
                     description="Target yang ditugaskan untuk Anda. Catat progres harian Anda di sini."
+                    action={
+                        <Button
+                            variant="outline"
+                            onClick={openExport}
+                            className="w-fit gap-1.5"
+                        >
+                            <Download className="h-4 w-4" />
+                            Export
+                        </Button>
+                    }
                 />
 
                 {targets.length === 0 ? (
@@ -405,74 +495,97 @@ export default function ReportsIndex({ targets, platformOptions, today }: Props)
                                                             <CalendarDays className="h-3 w-3 shrink-0" />
                                                             {group.date}
                                                         </div>
-                                                        {group.entries.map(
-                                                            (entry) => (
+                                                        {group.platforms.map(
+                                                            (pg) => (
                                                                 <div
                                                                     key={
-                                                                        entry.id
+                                                                        pg.platform
                                                                     }
-                                                                    className="flex items-start justify-between gap-2 rounded-lg bg-muted/50 px-3 py-1.5 text-xs"
+                                                                    className="space-y-1"
                                                                 >
-                                                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                                                        <span className="shrink-0 font-medium">
+                                                                    <div className="flex items-center gap-1.5 px-0.5">
+                                                                        <span className="text-xs font-semibold">
                                                                             {
-                                                                                entry.platform_label
+                                                                                pg.platform_label
                                                                             }
                                                                         </span>
-                                                                        <span className="shrink-0 tabular-nums text-lux-teal-dark dark:text-lux-teal">
+                                                                        <span className="text-[11px] tabular-nums text-lux-teal-dark dark:text-lux-teal">
                                                                             +
                                                                             {
-                                                                                entry.quantity
+                                                                                pg.total
                                                                             }
                                                                         </span>
-                                                                        {entry.item_label && (
-                                                                            <span className="inline-flex min-w-0 items-center gap-1 rounded-md bg-lux-teal/10 px-1.5 py-0.5 text-[10px] font-medium text-lux-teal-dark dark:text-lux-teal">
-                                                                                <Link2 className="h-2.5 w-2.5 shrink-0" />
-                                                                                <span className="truncate">
-                                                                                    {
-                                                                                        entry.item_label
-                                                                                    }
-                                                                                </span>
-                                                                            </span>
-                                                                        )}
-                                                                        {entry.post_url && (
-                                                                            <a
-                                                                                href={
-                                                                                    entry.post_url
-                                                                                }
-                                                                                target="_blank"
-                                                                                rel="noopener noreferrer"
-                                                                                className="inline-flex min-w-0 items-center gap-0.5 truncate text-muted-foreground hover:text-foreground"
-                                                                            >
-                                                                                <ExternalLink className="h-3 w-3 shrink-0" />
-                                                                                bukti
-                                                                            </a>
-                                                                        )}
                                                                     </div>
-                                                                    <div className="mt-0.5 flex shrink-0 items-center gap-1">
-                                                                        <button
-                                                                            onClick={() =>
-                                                                                openEditEntry(
-                                                                                    target,
-                                                                                    entry,
-                                                                                )
-                                                                            }
-                                                                            className="text-muted-foreground transition-colors hover:text-lux-teal-dark dark:hover:text-lux-teal"
-                                                                            title="Ubah"
-                                                                        >
-                                                                            <Pencil className="h-3.5 w-3.5" />
-                                                                        </button>
-                                                                        <button
-                                                                            onClick={() =>
-                                                                                deleteEntry(
-                                                                                    entry.id,
-                                                                                )
-                                                                            }
-                                                                            className="text-muted-foreground transition-colors hover:text-destructive"
-                                                                            title="Hapus"
-                                                                        >
-                                                                            <Trash2 className="h-3.5 w-3.5" />
-                                                                        </button>
+                                                                    <div className="space-y-1 border-l-2 border-lux-teal/15 pl-2">
+                                                                        {pg.entries.map(
+                                                                            (
+                                                                                entry,
+                                                                            ) => (
+                                                                                <div
+                                                                                    key={
+                                                                                        entry.id
+                                                                                    }
+                                                                                    className="flex items-start justify-between gap-2 rounded-lg bg-muted/50 px-3 py-1.5 text-xs"
+                                                                                >
+                                                                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                                                                        <span className="shrink-0 tabular-nums text-lux-teal-dark dark:text-lux-teal">
+                                                                                            +
+                                                                                            {
+                                                                                                entry.quantity
+                                                                                            }
+                                                                                        </span>
+                                                                                        {entry.item_label && (
+                                                                                            <span className="inline-flex min-w-0 items-center gap-1 rounded-md bg-lux-teal/10 px-1.5 py-0.5 text-[10px] font-medium text-lux-teal-dark dark:text-lux-teal">
+                                                                                                <Link2 className="h-2.5 w-2.5 shrink-0" />
+                                                                                                <span className="truncate">
+                                                                                                    {
+                                                                                                        entry.item_label
+                                                                                                    }
+                                                                                                </span>
+                                                                                            </span>
+                                                                                        )}
+                                                                                        {entry.post_url && (
+                                                                                            <a
+                                                                                                href={
+                                                                                                    entry.post_url
+                                                                                                }
+                                                                                                target="_blank"
+                                                                                                rel="noopener noreferrer"
+                                                                                                className="inline-flex min-w-0 items-center gap-0.5 truncate text-muted-foreground hover:text-foreground"
+                                                                                            >
+                                                                                                <ExternalLink className="h-3 w-3 shrink-0" />
+                                                                                                bukti
+                                                                                            </a>
+                                                                                        )}
+                                                                                    </div>
+                                                                                    <div className="mt-0.5 flex shrink-0 items-center gap-1">
+                                                                                        <button
+                                                                                            onClick={() =>
+                                                                                                openEditEntry(
+                                                                                                    target,
+                                                                                                    entry,
+                                                                                                )
+                                                                                            }
+                                                                                            className="text-muted-foreground transition-colors hover:text-lux-teal-dark dark:hover:text-lux-teal"
+                                                                                            title="Ubah"
+                                                                                        >
+                                                                                            <Pencil className="h-3.5 w-3.5" />
+                                                                                        </button>
+                                                                                        <button
+                                                                                            onClick={() =>
+                                                                                                deleteEntry(
+                                                                                                    entry.id,
+                                                                                                )
+                                                                                            }
+                                                                                            className="text-muted-foreground transition-colors hover:text-destructive"
+                                                                                            title="Hapus"
+                                                                                        >
+                                                                                            <Trash2 className="h-3.5 w-3.5" />
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                            ),
+                                                                        )}
                                                                     </div>
                                                                 </div>
                                                             ),
@@ -903,6 +1016,82 @@ export default function ReportsIndex({ targets, platformOptions, today }: Props)
                             </Button>
                         </DialogFooter>
                     </form>
+                </DialogContent>
+            </Dialog>
+
+            {/* export daily progress dialog */}
+            <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+                    <DialogHeader>
+                        <DialogTitle>Export Progres</DialogTitle>
+                        <DialogDescription>
+                            Ringkasan progres harian Anda per target, siap
+                            disalin atau diunduh.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4">
+                        <div className="flex flex-wrap items-end gap-3">
+                            <div className="grid gap-2">
+                                <Label className={labelClasses}>Tanggal</Label>
+                                <DatePicker
+                                    value={exportDate}
+                                    onChange={(v) => {
+                                        setExportDate(v);
+                                        if (v) loadExport(v);
+                                    }}
+                                    className="w-44"
+                                />
+                            </div>
+                            <div className="ml-auto flex items-center gap-2">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={copyExport}
+                                    disabled={exportLoading || !exportText}
+                                    className="gap-1.5"
+                                >
+                                    {copied ? (
+                                        <Check className="h-4 w-4 text-emerald-600" />
+                                    ) : (
+                                        <Copy className="h-4 w-4" />
+                                    )}
+                                    {copied ? 'Tersalin' : 'Salin'}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    onClick={downloadExport}
+                                    disabled={exportLoading || !exportText}
+                                    className="gap-1.5"
+                                >
+                                    <Download className="h-4 w-4" />
+                                    Unduh .txt
+                                </Button>
+                            </div>
+                        </div>
+
+                        <div className="relative">
+                            {exportLoading && (
+                                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-background/60">
+                                    <Spinner />
+                                </div>
+                            )}
+                            <Textarea
+                                readOnly
+                                value={exportText}
+                                rows={16}
+                                className="rounded-xl border-border bg-white/60 font-mono text-xs leading-relaxed whitespace-pre shadow-none focus-visible:border-lux-teal focus-visible:ring-2 focus-visible:ring-lux-teal/20 dark:bg-white/5"
+                            />
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <DialogClose asChild>
+                            <Button type="button" variant="secondary">
+                                Tutup
+                            </Button>
+                        </DialogClose>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </>

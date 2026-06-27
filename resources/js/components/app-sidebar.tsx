@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import AppLogo from '@/components/app-logo';
 import { NavMain } from '@/components/nav-main';
+import { NavReportCopy } from '@/components/nav-report-copy';
 import { NavUser } from '@/components/nav-user';
 import {
     Sidebar,
@@ -102,6 +103,8 @@ export function AppSidebar() {
             </SidebarHeader>
 
             <SidebarContent>
+                {/* Quick copy of one's own daily progress / comment report. */}
+                {!canManageUsers && <NavReportCopy />}
                 <NavMain items={mainNavItems} />
             </SidebarContent>
 

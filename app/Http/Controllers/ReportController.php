@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Enums\Platform;
 use App\Models\Report;
 use App\Models\Target;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -235,6 +237,82 @@ class ReportController extends Controller
         });
 
         return back();
+    }
+
+    /**
+     * Plain-text summary of the current user's progress for a date, grouped by
+     * target (then platform). Returned as JSON for the export modal to display,
+     * copy, or download.
+     */
+    public function export(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'date' => ['required', 'date'],
+        ]);
+
+        $user = $request->user();
+        $date = Carbon::parse($validated['date']);
+
+        $reports = $user->reports()
+            ->with(['targetItem:id,label', 'target:id,start_date,end_date'])
+            ->whereDate('reported_on', $date->toDateString())
+            ->orderBy('target_id')
+            ->orderBy('platform')
+            ->orderBy('id')
+            ->get();
+
+        $lines = [];
+        $lines[] = 'Progres '.$date->translatedFormat('d F Y');
+        $lines[] = $user->name;
+        $lines[] = '';
+
+        if ($reports->isEmpty()) {
+            $lines[] = 'Tidak ada progres pada tanggal ini.';
+
+            return response()->json([
+                'date' => $date->toDateString(),
+                'filename' => 'progres-'.$date->toDateString().'.txt',
+                'text' => implode("\n", $lines)."\n",
+            ]);
+        }
+
+        $grandTotal = 0;
+
+        foreach ($reports->groupBy('target_id') as $targetReports) {
+            $target = $targetReports->first()->target;
+            $lines[] = 'Target '.($target
+                ? $target->start_date->translatedFormat('d M').' – '.$target->end_date->translatedFormat('d M Y')
+                : 'Tanpa target');
+
+            foreach ($targetReports as $report) {
+                $label = $report->targetItem?->label ?? $report->item_label;
+                $line = '• '.$report->platform->label().' +'.$report->quantity;
+                if ($label) {
+                    $line .= ' — '.$label;
+                }
+                $lines[] = $line;
+                if ($report->post_url) {
+                    $lines[] = '   '.$report->post_url;
+                }
+                $grandTotal += $report->quantity;
+            }
+
+            // one shared daily note per (target, date)
+            $note = $targetReports->first(fn (Report $r) => filled($r->note))?->note;
+            if ($note) {
+                $lines[] = 'Catatan: '.$note;
+            }
+
+            $lines[] = '';
+        }
+
+        $lines[] = 'Total: +'.$grandTotal;
+
+        return response()->json([
+            'date' => $date->toDateString(),
+            'filename' => 'progres-'.$date->toDateString().'.txt',
+            'text' => rtrim(implode("\n", $lines))."\n",
+        ]);
     }
 
     /**

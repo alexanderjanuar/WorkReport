@@ -22,6 +22,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     // Progress entries — every user logs progress against their own targets.
     Route::get('reports', [ReportController::class, 'index'])->name('reports.index');
+    Route::get('reports/export', [ReportController::class, 'export'])->name('reports.export');
     Route::get('reports/riwayat', [ReportController::class, 'history'])->name('reports.history');
     Route::post('reports', [ReportController::class, 'store'])->name('reports.store');
     Route::patch('reports/{report}', [ReportController::class, 'update'])->name('reports.update');
