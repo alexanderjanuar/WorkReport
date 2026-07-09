@@ -38,6 +38,10 @@ return [
     'apify' => [
         'token' => env('APIFY_TOKEN'),
         'instagram_actor' => env('APIFY_INSTAGRAM_ACTOR', 'dSCLg0C3YEZ83HzYX'),
+        // Instagram post scraper (fetches post details by URL/username).
+        'instagram_post_actor' => env('APIFY_INSTAGRAM_POST_ACTOR', 'nH2AHrwxeTRJoN5hX'),
+        // Instagram comment scraper (fetches a post's comments by URL).
+        'instagram_comment_actor' => env('APIFY_INSTAGRAM_COMMENT_ACTOR', 'SbK00X0JYCPblD2wp'),
     ],
 
 ];

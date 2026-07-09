@@ -1,6 +1,15 @@
 import { Head, router } from '@inertiajs/react';
-import { Check, Copy, Download, ExternalLink, Search } from 'lucide-react';
+import {
+    Check,
+    Copy,
+    Download,
+    ExternalLink,
+    FileJson,
+    MessagesSquare,
+    Search,
+} from 'lucide-react';
 import { useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { PageHeader, primaryButtonClass } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { DatePicker } from '@/components/ui/date-picker';
@@ -92,13 +101,64 @@ export default function TeamComments({
     const [exportFilename, setExportFilename] = useState('riport.txt');
     const [exportLoading, setExportLoading] = useState(false);
     const [copied, setCopied] = useState(false);
+    // include Apify-scraped post details in the report (slower)
+    const [scrapePosts, setScrapePosts] = useState(false);
+    // download the full raw scraped post / comment data (all fields) as JSON
+    const [downloading, setDownloading] = useState<'post' | 'comment' | null>(
+        null,
+    );
 
-    const loadExport = async (date: string) => {
+    // kind: 'post' → /post-data (post details) · 'comment' → /comment-data (its comments)
+    const downloadScrape = async (kind: 'post' | 'comment') => {
+        if (!exportDate) return;
+        const cfg =
+            kind === 'post'
+                ? { path: 'post-data', noun: 'postingan', fallback: 'postingan.json' }
+                : {
+                      path: 'comment-data',
+                      noun: 'komentar',
+                      fallback: 'komentar.json',
+                  };
+        setDownloading(kind);
+        try {
+            const res = await fetch(
+                `/komentar-tim/${cfg.path}?date=${encodeURIComponent(exportDate)}`,
+                { headers: { Accept: 'application/json' } },
+            );
+            const data = await res.json();
+            if (!data.items || data.items.length === 0) {
+                toast.error(
+                    data.requested === 0
+                        ? 'Tidak ada postingan Instagram di tanggal ini.'
+                        : `Apify tidak mengembalikan data ${cfg.noun}.`,
+                );
+                return;
+            }
+            const blob = new Blob([JSON.stringify(data.items, null, 2)], {
+                type: 'application/json',
+            });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = data.filename ?? cfg.fallback;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            toast.success(`${data.count} ${cfg.noun} diunduh (JSON).`);
+        } catch {
+            toast.error(`Gagal mengambil data ${cfg.noun}.`);
+        } finally {
+            setDownloading(null);
+        }
+    };
+
+    const loadExport = async (date: string, scrape: boolean) => {
         setExportLoading(true);
         setCopied(false);
         try {
             const res = await fetch(
-                `/komentar-tim/export?date=${encodeURIComponent(date)}`,
+                `/komentar-tim/export?date=${encodeURIComponent(date)}${scrape ? '&scrape=1' : ''}`,
                 { headers: { Accept: 'application/json' } },
             );
             const data = await res.json();
@@ -115,7 +175,7 @@ export default function TeamComments({
         const date = filters.date || today;
         setExportDate(date);
         setExportOpen(true);
-        loadExport(date);
+        loadExport(date, scrapePosts);
     };
 
     const copyExport = async () => {
@@ -424,7 +484,7 @@ export default function TeamComments({
 
             {/* export daily report dialog */}
             <Dialog open={exportOpen} onOpenChange={setExportOpen}>
-                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
                     <DialogHeader>
                         <DialogTitle>Export Laporan Komentar</DialogTitle>
                         <DialogDescription>
@@ -443,7 +503,7 @@ export default function TeamComments({
                                     value={exportDate}
                                     onChange={(v) => {
                                         setExportDate(v);
-                                        if (v) loadExport(v);
+                                        if (v) loadExport(v, scrapePosts);
                                     }}
                                     className="w-44"
                                 />
@@ -471,6 +531,69 @@ export default function TeamComments({
                                 >
                                     <Download className="h-4 w-4" />
                                     Unduh .txt
+                                </Button>
+                            </div>
+                        </div>
+
+                        <label className="flex flex-wrap items-center gap-2 rounded-xl border border-lux-teal/20 bg-lux-teal/[0.05] px-3 py-2.5 text-sm text-foreground/80 select-none">
+                            <input
+                                type="checkbox"
+                                checked={scrapePosts}
+                                disabled={exportLoading}
+                                onChange={(e) => {
+                                    const on = e.target.checked;
+                                    setScrapePosts(on);
+                                    if (exportDate) loadExport(exportDate, on);
+                                }}
+                                className="size-4 rounded border-border accent-lux-teal"
+                            />
+                            <span className="font-medium">
+                                Ambil data postingan (Apify)
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                                — tambahkan tanggal, like & caption post yang
+                                dikomentari (lebih lambat, khusus Instagram)
+                            </span>
+                        </label>
+
+                        <div className="rounded-xl border border-border bg-muted/30 px-3 py-3">
+                            <div className="mb-2.5">
+                                <div className="text-sm font-medium">
+                                    Data mentah (Apify)
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                    Scrape post yang dikomentari tanggal ini &
+                                    unduh JSON berisi semua field.
+                                </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => downloadScrape('post')}
+                                    disabled={downloading !== null || exportLoading}
+                                    className="gap-1.5"
+                                >
+                                    {downloading === 'post' ? (
+                                        <Spinner />
+                                    ) : (
+                                        <FileJson className="h-4 w-4" />
+                                    )}
+                                    Unduh Postingan
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => downloadScrape('comment')}
+                                    disabled={downloading !== null || exportLoading}
+                                    className="gap-1.5"
+                                >
+                                    {downloading === 'comment' ? (
+                                        <Spinner />
+                                    ) : (
+                                        <MessagesSquare className="h-4 w-4" />
+                                    )}
+                                    Unduh Komentar
                                 </Button>
                             </div>
                         </div>

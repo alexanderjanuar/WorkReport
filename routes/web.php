@@ -55,6 +55,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
         // Oversight: all members' distributed comments.
         Route::get('komentar-tim', [TeamCommentController::class, 'index'])->name('comments.team');
         Route::get('komentar-tim/export', [TeamCommentController::class, 'export'])->name('comments.team.export');
+        Route::get('komentar-tim/post-data', [TeamCommentController::class, 'downloadPosts'])->name('comments.team.posts');
+        Route::get('komentar-tim/comment-data', [TeamCommentController::class, 'downloadComments'])->name('comments.team.post-comments');
 
         // Media management (list/detail/edit/delete) — admin/ketua only. Creating
         // a media is allowed for any member (route registered above).
